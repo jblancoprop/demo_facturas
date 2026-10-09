@@ -19,8 +19,7 @@ export default function Detail({ d }: { d: { inv: any; lines: any[]; approvals: 
   return (
     <div className="detail" id="detalle">
       <div className="pdfpane">
-        <div className="fn">📄 {inv.pdf_name ?? "factura.pdf"}</div>
-        {inv.has_pdf ? (
+      <div className="fn">📄 {inv.pdf_name ?? "factura.pdf"} · <a className="rowlink" href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer">Abrir en pestaña nueva</a></div>        {inv.has_pdf ? (
           <iframe src={`/api/invoices/${inv.id}/pdf`} title="PDF de la factura" />
         ) : (
           <div className="empty">Sin PDF adjunto</div>
