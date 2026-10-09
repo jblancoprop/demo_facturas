@@ -104,7 +104,7 @@ export default async function Monitor({
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id as string} className={`rw ${r.id === id ? "sel" : ""}`}>
-                  <td><Link className="rowlink" href={`/${qs({ ...keep, id: r.id as string })}#detalle`}>{r.invoice_number}</Link></td>
+                  <td><Link className="rowlink" href={r.id === id ? `/${qs(keep)}` : `/${qs({ ...keep, id: r.id as string })}#detalle`}>{r.invoice_number}</Link></td>
                   <td>{r.supplier_name || <span className="c-red">— sin proveedor —</span>}</td>
                   <td className="r num">{eur(r.total)}</td>
                   <td><span className="tag">{r.posting_type === "logistico" ? "Logístico" : "Financiero"}</span></td>
@@ -119,7 +119,6 @@ export default async function Monitor({
         </div>
       </div>
 
-      {detail && <Detail d={detail} />}
-    </>
+    {detail && <Detail d={detail} closeHref={`/${qs(keep)}`} />}    </>
   );
 }

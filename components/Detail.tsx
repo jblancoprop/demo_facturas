@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { STATUS, eur } from "@/lib/db";
+import Link from "next/link";
 import { saveInvoice, validateInvoice, approveInvoice, rejectInvoice, reopenInvoice, postInvoice } from "@/app/actions";
 
 export const Badge = ({ s }: { s: string }) => (
   <span className={`badge s-${s}`}>{STATUS[s as keyof typeof STATUS]}</span>
 );
 
-export default function Detail({ d }: { d: { inv: any; lines: any[]; approvals: any[]; events: any[] } }) {
-  const { inv, lines, approvals, events } = d;
-  const ed = inv.status === "pendiente";
+export default function Detail({ d, closeHref }: { d: { inv: any; lines: any[]; approvals: any[]; events: any[] }; closeHref?: string }) {  const { inv, lines, approvals, events } = d;
+  const canEdit = inv.status === "pendiente" || inv.status === "pendiente_aprobacion";
   const next = approvals.findIndex((a: any) => a.decision === "pending");
   const sumLines = lines.reduce((a, l) => a + Number(l.amount), 0);
   const mismatch = lines.length > 0 && Math.abs(sumLines - Number(inv.base)) > 0.02;
@@ -27,8 +27,8 @@ export default function Detail({ d }: { d: { inv: any; lines: any[]; approvals: 
       </div>
 
       <div className="formpane">
-        <div className="dh">
-          <h3>
+      <div className="dh">
+          {closeHref && <Link href={closeHref} className="btn sm" style={{ float: "right" }}>✕ Minimizar</Link>}          <h3>
             {inv.supplier_name || "Proveedor sin identificar"}
             <small>{inv.invoice_number}</small>
           </h3>
@@ -56,7 +56,7 @@ export default function Detail({ d }: { d: { inv: any; lines: any[]; approvals: 
 
         <form>
           <input type="hidden" name="id" value={inv.id} />
-          <fieldset disabled={!ed} className="fs">
+          <fieldset disabled={!canEdit} className="fs">
             <div className="grid2">
               <label className={noSup ? "bad" : ""}>Proveedor *
                 <input name="supplier_name" className={noSup ? "bad" : ""} defaultValue={inv.supplier_name ?? ""} /></label>
@@ -101,10 +101,10 @@ export default function Detail({ d }: { d: { inv: any; lines: any[]; approvals: 
             {mismatch && <div className="issue">La suma de líneas ({eur(sumLines)}) no cuadra con la base.</div>}
           </div>
 
-          {ed && (
+          {canEdit && (
             <div className="act">
               <button className="btn" formAction={saveInvoice}>Guardar cambios</button>
-              <button className="btn pri" formAction={validateInvoice}>Validar y enviar a aprobación →</button>
+              {ed && <button className="btn pri" formAction={validateInvoice}>Validar y enviar a aprobación →</button>}
             </div>
           )}
         </form>
