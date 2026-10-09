@@ -1,68 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 
-export const maxDuration = 30;
-
-const num = (x: any) => {
-  const v = Number(String(x ?? 0).replace(",", "."));
-  return isNaN(v) ? 0 : v;
-};
-
-export async function POST(req: Request) {
-  if (!process.env.INGEST_API_KEY || req.headers.get("x-api-key") !== process.env.INGEST_API_KEY) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  let d: any;
-  let pdf: string | null = null;
-  const ct = req.headers.get("content-type") ?? "";
-  if (ct.includes("multipart/form-data")) {
-    const fd = await req.formData();
-    d = JSON.parse(String(fd.get("data")));
-    const f = fd.get("pdf");
-    if (f && typeof f !== "string") pdf = Buffer.from(await f.arrayBuffer()).toString("base64");
-  } else {
-    d = await req.json();
-    pdf = d.pdf_base64 ?? null;
-  }
-
-  const id: string = d.id ?? "F-" + Date.now();
-  const status = d.incidencias || d.estado === "Revisión manual" ? "pendiente" : "pendiente_aprobacion";
-  const posting = d.po_number ? "logistico" : "financiero";
-
-  const ins = await sql`
-    insert into invoices (id, pdf_name, pdf_b64, received_at, sender, subject,
-      supplier_name, supplier_nif, customer_name, customer_nif, invoice_number, invoice_date,
-      base, vat, total, po_number, posting_type, status, confidence, issues)
-    values (${id}, ${d.nombre_pdf ?? null}, ${pdf}, ${d.fecha_recepcion ?? new Date().toISOString()},
-      ${d.remitente ?? null}, ${d.asunto ?? null},
-      ${d.proveedor ?? null}, ${d.nif_proveedor ?? null}, ${d.nombre_cliente ?? null}, ${d.nif_cliente ?? null},
-      ${d.numero_factura ?? null}, ${d.fecha_factura ?? null},
-      ${num(d.base_imponible)}, ${num(d.cuota_iva)}, ${num(d.total)},
-      ${d.po_number ?? null}, ${posting}, ${status}, ${d.confianza ?? null}, ${d.incidencias || null})
-    on conflict (supplier_nif, invoice_number) do nothing
-    returning id`;
-  if (!ins.length) return NextResponse.json({ duplicate: true });
-
-  const stmts = [
-    ...(d.lineas ?? []).map((l: any, i: number) => {
-      const qty = num(l.cantidad);
-      const amount = num(l.importe);
-      const pu = l.precio_unitario != null ? num(l.precio_unitario) : qty ? amount / qty : 0;
-      return sql`insert into invoice_lines
-        (invoice_id, line_no, description, internal_code, qty, unit_price, vat_rate, amount, issue)
-        values (${id}, ${i + 1}, ${l.descripcion ?? null}, ${l.codigo_interno ?? null},
-          ${qty}, ${pu}, ${l.iva_pct != null ? num(l.iva_pct) : 21}, ${amount}, ${l.incidencia ?? null})`;
-    }),
-    ...(d.aprobadores ?? []).map((a: any, i: number) =>
-      sql`insert into approvals (invoice_id, level, approver_name, approver_email)
-          values (${id}, ${i + 1}, ${a.nombre ?? null}, ${a.email ?? null})`
-    ),
-    sql`insert into invoice_events (invoice_id, event, actor, detail)
-        values (${id}, 'recibida', 'n8n', ${d.asunto ?? null})`,
-  ];
-  await sql.transaction(stmts);
-
-  return NextResponse.json({ ok: true, id, status });
+export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const r = await sql`select pdf_b64 from invoices where id = ${id}`;
+  if (!r[0]?.pdf_b64) return new Response("not found", { status: 404 });
+  return new Response(new Uint8Array(Buffer.from(r[0].pdf_b64 as string, "base64")), {
+    headers: { "content-type": "application/pdf", "content-disposition": "inline" },
+  });
 }
