@@ -2,6 +2,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
+import { syncExcel } from "@/lib/sync";
+
+const EXCEL_ESTADO: Record<string, string> = {
+  pendiente: "Revisión manual",
+  pendiente_aprobacion: "Pendiente aprobación",
+  aprobada: "Aprobada",
+  rechazada: "Rechazada",
+  contabilizada: "Contabilizada",
+};
 
 const num = (x: any) => {
   const v = Number(String(x ?? 0).replace(",", "."));
@@ -10,12 +19,31 @@ const num = (x: any) => {
 const txt = (x: any) => String(x ?? "").trim();
 const log = (id: string, event: string, detail?: string | null) =>
   sql`insert into invoice_events (invoice_id, event, actor, detail) values (${id}, ${event}, 'Finanzas', ${detail ?? null})`;
-const refresh = (id: string) => {
-  revalidatePath("/");
-  revalidatePath(`/facturas/${id}`);
-};
 
-export async function saveInvoice(fd: FormData) {
+async function finish(id: string) {
+  revalidatePath("/", "layout");
+  const [r] = await sql`select i.*,
+    (select count(*)::int from approvals a where a.invoice_id = i.id) as lv,
+    (select count(*)::int from approvals a where a.invoice_id = i.id and a.decision = 'approved') as ok
+    from invoices i where i.id = ${id}`;
+  if (!r) return;
+  await syncExcel({
+    id: r.id,
+    estado: EXCEL_ESTADO[r.status as string] ?? r.status,
+    motivo: r.rejection_reason ?? r.issues ?? "",
+    nivel_aprobado: `${r.ok}/${r.lv}`,
+    sap_doc: r.sap_doc ?? "",
+    proveedor: r.supplier_name,
+    nif: r.supplier_nif,
+    n_factura: r.invoice_number,
+    fecha_factura: r.invoice_date,
+    base: Number(r.base),
+    iva: Number(r.vat),
+    total: Number(r.total),
+  });
+}
+
+async function persist(fd: FormData) {
   const id = txt(fd.get("id"));
   const lineIds = fd.getAll("line_id").map(String);
   const po = txt(fd.get("po_number"));
@@ -52,16 +80,28 @@ export async function saveInvoice(fd: FormData) {
     where id = ${id}`);
   stmts.push(log(id, "editada", "Cabecera y líneas actualizadas"));
   await sql.transaction(stmts);
-  refresh(id);
+  return id;
+}
+
+export async function saveInvoice(fd: FormData) {
+  const id = await persist(fd);
+  await finish(id);
 }
 
 export async function validateInvoice(fd: FormData) {
-  await saveInvoice(fd);
-  const id = txt(fd.get("id"));
-  await sql`update invoices set status = 'pendiente_aprobacion', issues = null, updated_at = now()
+  const id = await persist(fd);
+  const [inv] = await sql`select supplier_name, supplier_nif, total from invoices where id = ${id}`;
+  const [{ miss }] = await sql`select count(*)::int as miss from invoice_lines
+    where invoice_id = ${id} and (internal_code is null or internal_code = '')`;
+  if (!inv?.supplier_name || !inv?.supplier_nif || miss > 0) {
+    await log(id, "validación fallida", "Faltan proveedor, NIF o códigos de producto");
+    await finish(id);
+    return;
+  }
+  await sql`update invoices set status = 'pendiente_aprobacion', issues = null, manual = true, updated_at = now()
             where id = ${id} and status = 'pendiente'`;
   await log(id, "validada", "Enviada a aprobación");
-  refresh(id);
+  await finish(id);
 }
 
 export async function approveInvoice(fd: FormData) {
@@ -77,8 +117,9 @@ export async function approveInvoice(fd: FormData) {
   const left = await sql`select 1 from approvals where invoice_id = ${id} and decision = 'pending'`;
   if (!left.length) {
     await sql`update invoices set status = 'aprobada', updated_at = now() where id = ${id}`;
+    await log(id, "aprobada", "Todos los niveles aprobados");
   }
-  refresh(id);
+  await finish(id);
 }
 
 export async function rejectInvoice(fd: FormData) {
@@ -88,22 +129,24 @@ export async function rejectInvoice(fd: FormData) {
             where id = (select id from approvals where invoice_id = ${id} and decision = 'pending' order by level limit 1)`;
   await sql`update invoices set status = 'rechazada', rejection_reason = ${reason}, updated_at = now() where id = ${id}`;
   await log(id, "rechazada", reason);
-  refresh(id);
+  await finish(id);
 }
 
 export async function reopenInvoice(fd: FormData) {
   const id = txt(fd.get("id"));
   await sql`update approvals set decision = 'pending', comment = null, decided_at = null where invoice_id = ${id}`;
-  await sql`update invoices set status = 'pendiente', rejection_reason = null, updated_at = now() where id = ${id}`;
+  await sql`update invoices set status = 'pendiente', rejection_reason = null, sap_doc = null, updated_at = now() where id = ${id}`;
   await log(id, "reabierta", "Vuelve a revisión");
-  refresh(id);
+  await finish(id);
 }
 
 export async function postInvoice(fd: FormData) {
   const id = txt(fd.get("id"));
-  const r = await sql`select posting_type from invoices where id = ${id}`;
-  const kind = r[0]?.posting_type === "logistico" ? "logístico (MIRO)" : "financiero (FB60)";
-  await sql`update invoices set status = 'contabilizada', updated_at = now() where id = ${id} and status = 'aprobada'`;
-  await log(id, "contabilizada", "Posting SAP " + kind + " (simulado)");
-  refresh(id);
+  const [r] = await sql`select posting_type from invoices where id = ${id}`;
+  const kind = r?.posting_type === "logistico" ? "logístico (MIRO)" : "financiero (FB60)";
+  const doc = "5105" + String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
+  await sql`update invoices set status = 'contabilizada', sap_doc = ${doc}, updated_at = now()
+            where id = ${id} and status = 'aprobada'`;
+  await log(id, "contabilizada", `Posting SAP ${kind} · doc ${doc} (simulado)`);
+  await finish(id);
 }

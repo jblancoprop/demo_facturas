@@ -1,18 +1,31 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Exo_2, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+import Tabs from "@/components/Tabs";
+import { sql } from "@/lib/db";
 
-export const metadata: Metadata = { title: "HIPRA · Facturas de proveedor" };
+export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "HIPRA Finances · Monitor de facturas" };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+const exo = Exo_2({ subsets: ["latin"], weight: ["400", "600", "700"], variable: "--font-exo" });
+const plex = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-plex" });
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const c = await sql`select
+    count(*) filter (where status = 'pendiente')::int as inc,
+    count(*) filter (where status = 'pendiente_aprobacion')::int as apr from invoices`;
   return (
-    <html lang="es">
+    <html lang="es" className={`${exo.variable} ${plex.variable}`}>
       <body>
-        <header className="topbar">
-          <Link href="/" className="brand">HIPRA Facturas</Link>
-          <span className="muted">Recepción y aprobación de facturas de proveedor</span>
-        </header>
-        <main className="wrap">{children}</main>
+        <div className="shell">
+          <div className="top">
+            <div className="brand">HIPRA <span>Finances</span></div>
+            <div className="ctx">Facturas de proveedor</div>
+            <div className="who">Finanzas</div>
+          </div>
+          <Tabs inc={c[0]?.inc ?? 0} apr={c[0]?.apr ?? 0} />
+          <main className="view">{children}</main>
+        </div>
       </body>
     </html>
   );

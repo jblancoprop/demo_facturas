@@ -1,85 +1,125 @@
 import Link from "next/link";
-import { sql, STATUS, eur } from "@/lib/db";
+import { sql, STATUS, ORDER, COLOR, eur, qs } from "@/lib/db";
+import { getDetail } from "@/lib/queries";
+import Detail, { Badge } from "@/components/Detail";
 
 export const dynamic = "force-dynamic";
 
-const ORDER = ["pendiente", "pendiente_aprobacion", "aprobada", "rechazada", "contabilizada"] as const;
-
-export default async function Home({
+export default async function Monitor({
   searchParams,
-}: {
-  searchParams: Promise<{ estado?: string; q?: string }>;
-}) {
-  const { estado, q } = await searchParams;
+}: { searchParams: Promise<{ estado?: string; ci?: string; q?: string; id?: string }> }) {
+  const { estado, ci, q, id } = await searchParams;
   const est = estado && estado in STATUS ? estado : null;
+  const cir = ci === "logistico" || ci === "financiero" ? ci : null;
   const term = q?.trim() ? `%${q.trim()}%` : null;
 
-  const counts = await sql`select status, count(*)::int as c, coalesce(sum(total),0) as t from invoices group by status`;
-  const rows = await sql`
-    select i.id, i.supplier_name, i.invoice_number, i.invoice_date, i.total, i.status, i.posting_type, i.issues, i.received_at,
-      (select count(*)::int from invoice_lines l where l.invoice_id = i.id) as nlines,
-      (select count(*)::int from approvals a where a.invoice_id = i.id and a.decision = 'approved') as ok,
-      (select count(*)::int from approvals a where a.invoice_id = i.id) as lv
-    from invoices i
-    where (${est}::text is null or i.status = ${est})
-      and (${term}::text is null or i.supplier_name ilike ${term} or i.invoice_number ilike ${term})
-    order by i.received_at desc limit 200`;
+  const [k] = await sql`select count(*)::int as n,
+    count(*) filter (where manual = false and status <> 'pendiente')::int as auto,
+    count(*) filter (where status = 'pendiente')::int as rev,
+    coalesce(sum(total) filter (where status = 'pendiente_aprobacion'), 0) as pend_amt,
+    count(*) filter (where status = 'pendiente_aprobacion')::int as pend_n from invoices`;
+  const byStatus = await sql`select status, count(*)::int as c from invoices group by status`;
+  const days = await sql`select to_char(received_at at time zone 'Europe/Madrid','YYYY-MM-DD') as d, count(*)::int as c
+    from invoices where received_at > now() - interval '9 days' group by 1`;
+  const top = await sql`select coalesce(nullif(supplier_name,''),'(sin proveedor)') as s, sum(total) as t
+    from invoices group by 1 order by t desc limit 4`;
+  const rows = await sql`select id, supplier_name, invoice_number, invoice_date, total, status, posting_type, manual
+    from invoices
+    where (${est}::text is null or status = ${est})
+      and (${cir}::text is null or posting_type = ${cir})
+      and (${term}::text is null or supplier_name ilike ${term} or invoice_number ilike ${term})
+    order by received_at desc limit 200`;
+  const detail = id ? await getDetail(id) : null;
 
-  const byStatus = Object.fromEntries(counts.map((r) => [r.status, r]));
-  const total = counts.reduce((a, r) => a + Number(r.c), 0);
-  const pend = byStatus["pendiente_aprobacion"];
+  const cnt = Object.fromEntries(byStatus.map((r) => [r.status, r.c as number]));
+  const maxS = Math.max(1, ...ORDER.map((s) => cnt[s] ?? 0));
+  const dmap = Object.fromEntries(days.map((r) => [r.d, r.c as number]));
+  const last7 = Array.from({ length: 7 }, (_, i) => {
+    const dt = new Date(Date.now() - (6 - i) * 864e5);
+    const key = dt.toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" });
+    const lab = dt.toLocaleDateString("es-ES", { timeZone: "Europe/Madrid", weekday: "short" }).slice(0, 2);
+    return { lab, v: dmap[key] ?? 0 };
+  });
+  const maxD = Math.max(1, ...last7.map((x) => x.v));
+  const auto = k.n ? Math.round(((k.auto as number) / (k.n as number)) * 100) : 0;
+  const keep = { estado: est, ci: cir, q: q?.trim() };
 
   return (
     <>
-      <div className="head">
-        <h1>Facturas</h1>
-        <p className="muted">
-          {total} facturas · {eur(pend?.t ?? 0)} esperando aprobación
-        </p>
+      <div className="row r4">
+        <div className="panel kpi"><div className="k">Total facturas</div><div className="kv">{k.n}</div><div className="ks c-mut">recibidas</div></div>
+        <div className="panel kpi"><div className="k">Tasa automatización</div><div className="kv c-grn">{auto}%</div><div className="ks c-grn">sin intervención manual</div></div>
+        <div className="panel kpi"><div className="k">Requieren revisión</div><div className="kv c-red">{k.rev}</div><div className="ks c-red">pendientes en Incidencias</div></div>
+        <div className="panel kpi"><div className="k">Pendiente de aprobar</div><div className="kv c-cy">{eur(k.pend_amt).replace(",00", "")}</div><div className="ks c-mut">{k.pend_n} facturas en circuito</div></div>
       </div>
 
-      <div className="toolbar">
-        <nav className="chips">
-          <Link href="/" className={!est ? "chip on" : "chip"}>Todas <b>{total}</b></Link>
+      <div className="panel row" style={{ padding: "14px 4px" }}>
+        <div className="flow">
           {ORDER.map((s) => (
-            <Link key={s} href={`/?estado=${s}`} className={est === s ? "chip on" : "chip"}>
-              {STATUS[s]} <b>{byStatus[s]?.c ?? 0}</b>
+            <Link key={s} href={`/${qs({ estado: s })}`} className="step">
+              <div className="sn" style={{ color: COLOR[s] }}>{cnt[s] ?? 0}</div>
+              <div className="sl">{STATUS[s]}</div>
+              <div className="bar"><i style={{ width: `${((cnt[s] ?? 0) / maxS) * 100}%`, background: COLOR[s] }} /></div>
             </Link>
           ))}
-        </nav>
-        <form className="search">
-          {est && <input type="hidden" name="estado" value={est} />}
-          <input name="q" defaultValue={q ?? ""} placeholder="Buscar proveedor o nº de factura" />
-          <button className="btn">Buscar</button>
-        </form>
+        </div>
       </div>
 
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Proveedor</th><th>Nº factura</th><th>Fecha</th><th>Circuito</th>
-            <th className="r">Líneas</th><th className="r">Total</th><th>Aprobación</th><th>Estado</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td><Link href={`/facturas/${r.id}`} className="lnk">{r.supplier_name || "— sin proveedor —"}</Link>
-                {r.issues && <div className="issue">{r.issues}</div>}</td>
-              <td>{r.invoice_number}</td>
-              <td>{r.invoice_date}</td>
-              <td>{r.posting_type === "logistico" ? "Logístico (PO)" : "Financiero"}</td>
-              <td className="r">{r.nlines}</td>
-              <td className="r num">{eur(r.total)}</td>
-              <td>{r.lv ? `${r.ok}/${r.lv} niveles` : "—"}</td>
-              <td><span className={`badge s-${r.status}`}>{STATUS[r.status as keyof typeof STATUS]}</span></td>
-            </tr>
-          ))}
-          {!rows.length && (
-            <tr><td colSpan={8} className="empty">No hay facturas con este filtro. Envía una al buzón y aparecerá aquí.</td></tr>
-          )}
-        </tbody>
-      </table>
+      <div className="row r2">
+        <div className="panel">
+          <h3>Facturas recibidas · últimos 7 días</h3>
+          <div className="chart">
+            {last7.map((x, i) => (
+              <div className="b" key={i}><em>{x.v}</em><i style={{ height: `${(x.v / maxD) * 100}%` }} /><span>{x.lab}</span></div>
+            ))}
+          </div>
+        </div>
+        <div className="panel">
+          <h3>Top proveedores por importe</h3>
+          {top.map((t) => (<div className="sup" key={t.s as string}><span>{t.s}</span><b className="c-cy">{eur(t.t)}</b></div>))}
+          {!top.length && <div className="c-mut">Sin datos todavía.</div>}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>Facturas</h3>
+        <form className="bar-filters">
+          <select name="estado" defaultValue={est ?? ""}>
+            <option value="">Estado: todos</option>
+            {ORDER.map((s) => <option key={s} value={s}>{STATUS[s]}</option>)}
+          </select>
+          <select name="ci" defaultValue={cir ?? ""}>
+            <option value="">Circuito: todos</option>
+            <option value="logistico">Logístico (con PO)</option>
+            <option value="financiero">Financiero (sin PO)</option>
+          </select>
+          <input name="q" defaultValue={q ?? ""} placeholder="Buscar proveedor o nº de factura" />
+          <button className="btn">Filtrar</button>
+          <span style={{ flex: 1 }} />
+          <a className="btn out" href={`/api/export${qs(keep)}`}>↓ Exportar CSV</a>
+        </form>
+        <div className="scroll">
+          <table className="tbl">
+            <thead><tr><th>Nº factura</th><th>Proveedor</th><th className="r">Importe</th><th>Circuito</th><th>Estado</th><th>Canal</th><th>Fecha</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id as string} className={`rw ${r.id === id ? "sel" : ""}`}>
+                  <td><Link className="rowlink" href={`/${qs({ ...keep, id: r.id as string })}#detalle`}>{r.invoice_number}</Link></td>
+                  <td>{r.supplier_name || <span className="c-red">— sin proveedor —</span>}</td>
+                  <td className="r num">{eur(r.total)}</td>
+                  <td><span className="tag">{r.posting_type === "logistico" ? "Logístico" : "Financiero"}</span></td>
+                  <td><Badge s={r.status as string} /></td>
+                  <td className="c-mut">{r.manual ? "Manual" : "Auto"}</td>
+                  <td className="c-mut">{r.invoice_date}</td>
+                </tr>
+              ))}
+              {!rows.length && <tr><td colSpan={7} className="empty">No hay facturas con este filtro.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {detail && <Detail d={detail} />}
     </>
   );
 }
