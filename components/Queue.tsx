@@ -24,7 +24,7 @@ export default async function Queue({
         <span>{idx + 1} / {list.length}</span>
         <Link className="btn sm" href={`${base}?id=${nxt}`}>→</Link>
       </div>
-      {d && <Detail d={d} />}
+      {d && <Detail key={list[idx].id as string} d={d} />}
     </>
   );
 }

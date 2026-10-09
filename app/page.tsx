@@ -1,14 +1,16 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { sql, STATUS, ORDER, COLOR, eur, qs } from "@/lib/db";
 import { getDetail } from "@/lib/queries";
 import Detail, { Badge } from "@/components/Detail";
 
 export const dynamic = "force-dynamic";
+const PAGE = 25;
 
 export default async function Monitor({
   searchParams,
-}: { searchParams: Promise<{ estado?: string; ci?: string; q?: string; id?: string }> }) {
-  const { estado, ci, q, id } = await searchParams;
+}: { searchParams: Promise<{ estado?: string; ci?: string; q?: string; id?: string; p?: string }> }) {
+  const { estado, ci, q, id, p: pRaw } = await searchParams;
   const est = estado && estado in STATUS ? estado : null;
   const cir = ci === "logistico" || ci === "financiero" ? ci : null;
   const term = q?.trim() ? `%${q.trim()}%` : null;
@@ -23,13 +25,20 @@ export default async function Monitor({
     from invoices where received_at > now() - interval '9 days' group by 1`;
   const top = await sql`select coalesce(nullif(supplier_name,''),'(sin proveedor)') as s, sum(total) as t
     from invoices group by 1 order by t desc limit 4`;
+
+  const [{ n: totalRows }] = await sql`select count(*)::int as n from invoices
+    where (${est}::text is null or status = ${est})
+      and (${cir}::text is null or posting_type = ${cir})
+      and (${term}::text is null or supplier_name ilike ${term} or invoice_number ilike ${term})`;
+  const pages = Math.max(1, Math.ceil((totalRows as number) / PAGE));
+  const p = Math.min(Math.max(1, parseInt(pRaw ?? "1") || 1), pages);
   const rows = await sql`select id, supplier_name, invoice_number, invoice_date, total, status, posting_type, manual
     from invoices
     where (${est}::text is null or status = ${est})
       and (${cir}::text is null or posting_type = ${cir})
       and (${term}::text is null or supplier_name ilike ${term} or invoice_number ilike ${term})
-    order by received_at desc limit 200`;
-  const detail = id ? await getDetail(id) : null;
+    order by received_at desc limit ${PAGE} offset ${(p - 1) * PAGE}`;
+  const detail = id && rows.some((r) => r.id === id) ? await getDetail(id) : null;
 
   const cnt = Object.fromEntries(byStatus.map((r) => [r.status, r.c as number]));
   const maxS = Math.max(1, ...ORDER.map((s) => cnt[s] ?? 0));
@@ -43,6 +52,7 @@ export default async function Monitor({
   const maxD = Math.max(1, ...last7.map((x) => x.v));
   const auto = k.n ? Math.round(((k.auto as number) / (k.n as number)) * 100) : 0;
   const keep = { estado: est, ci: cir, q: q?.trim() };
+  const pg = (n: number) => (n > 1 ? String(n) : undefined);
 
   return (
     <>
@@ -82,7 +92,7 @@ export default async function Monitor({
       </div>
 
       <div className="panel">
-        <h3>Facturas</h3>
+        <h3>Facturas · {totalRows} {est || cir || q ? "con este filtro" : "en total"}</h3>
         <form className="bar-filters">
           <select name="estado" defaultValue={est ?? ""}>
             <option value="">Estado: todos</option>
@@ -98,27 +108,50 @@ export default async function Monitor({
           <span style={{ flex: 1 }} />
           <a className="btn out" href={`/api/export${qs(keep)}`}>↓ Exportar CSV</a>
         </form>
-        <div className="scroll">
-          <table className="tbl">
-            <thead><tr><th>Nº factura</th><th>Proveedor</th><th className="r">Importe</th><th>Circuito</th><th>Estado</th><th>Canal</th><th>Fecha</th></tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id as string} className={`rw ${r.id === id ? "sel" : ""}`}>
-                  <td><Link className="rowlink" href={r.id === id ? `/${qs(keep)}` : `/${qs({ ...keep, id: r.id as string })}#detalle`}>{r.invoice_number}</Link></td>
-                  <td>{r.supplier_name || <span className="c-red">— sin proveedor —</span>}</td>
-                  <td className="r num">{eur(r.total)}</td>
-                  <td><span className="tag">{r.posting_type === "logistico" ? "Logístico" : "Financiero"}</span></td>
-                  <td><Badge s={r.status as string} /></td>
-                  <td className="c-mut">{r.manual ? "Manual" : "Auto"}</td>
-                  <td className="c-mut">{r.invoice_date}</td>
-                </tr>
-              ))}
-              {!rows.length && <tr><td colSpan={7} className="empty">No hay facturas con este filtro.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-    {detail && <Detail d={detail} closeHref={`/${qs(keep)}`} />}    </>
+        <table className="tbl">
+          <thead><tr><th>Nº factura</th><th>Proveedor</th><th className="r">Importe</th><th>Circuito</th><th>Estado</th><th>Canal</th><th>Fecha</th></tr></thead>
+          <tbody>
+            {rows.map((r) => {
+              const open = r.id === id && detail;
+              return (
+                <Fragment key={r.id as string}>
+                  <tr id={open ? "sel" : undefined} className={`rw ${open ? "sel" : ""}`}>
+                    <td>
+                      <Link className="rowlink"
+                        href={open ? `/${qs({ ...keep, p: pg(p) })}` : `/${qs({ ...keep, p: pg(p), id: r.id as string })}#sel`}>
+                        {open ? "▾ " : "▸ "}{r.invoice_number}
+                      </Link>
+                    </td>
+                    <td>{r.supplier_name || <span className="c-red">— sin proveedor —</span>}</td>
+                    <td className="r num">{eur(r.total)}</td>
+                    <td><span className="tag">{r.posting_type === "logistico" ? "Logístico" : "Financiero"}</span></td>
+                    <td><Badge s={r.status as string} /></td>
+                    <td className="c-mut">{r.manual ? "Manual" : "Auto"}</td>
+                    <td className="c-mut">{r.invoice_date}</td>
+                  </tr>
+                  {open && (
+                    <tr className="detail-row">
+                      <td colSpan={7}>
+                        <Detail key={detail.inv.id as string} d={detail} closeHref={`/${qs({ ...keep, p: pg(p) })}`} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={7} className="empty">No hay facturas con este filtro.</td></tr>}
+          </tbody>
+        </table>
+
+        {pages > 1 && (
+          <div className="pager-bar">
+            {p > 1 ? <Link className="btn sm" href={`/${qs({ ...keep, p: pg(p - 1) })}`}>← Anterior</Link> : <span />}
+            <span>Página {p} de {pages}</span>
+            {p < pages ? <Link className="btn sm" href={`/${qs({ ...keep, p: pg(p + 1) })}`}>Siguiente →</Link> : <span />}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
