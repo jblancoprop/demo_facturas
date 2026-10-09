@@ -1,13 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { STATUS, eur } from "@/lib/db";
 import Link from "next/link";
+import { STATUS, eur } from "@/lib/db";
 import { saveInvoice, validateInvoice, approveInvoice, rejectInvoice, reopenInvoice, postInvoice } from "@/app/actions";
 
 export const Badge = ({ s }: { s: string }) => (
   <span className={`badge s-${s}`}>{STATUS[s as keyof typeof STATUS]}</span>
 );
 
-export default function Detail({ d, closeHref }: { d: { inv: any; lines: any[]; approvals: any[]; events: any[] }; closeHref?: string }) {  const { inv, lines, approvals, events } = d;
+export default function Detail({
+  d,
+  closeHref,
+}: {
+  d: { inv: any; lines: any[]; approvals: any[]; events: any[] };
+  closeHref?: string;
+}) {
+  const { inv, lines, approvals, events } = d;
+  const ed = inv.status === "pendiente";
   const canEdit = inv.status === "pendiente" || inv.status === "pendiente_aprobacion";
   const next = approvals.findIndex((a: any) => a.decision === "pending");
   const sumLines = lines.reduce((a, l) => a + Number(l.amount), 0);
@@ -19,7 +27,13 @@ export default function Detail({ d, closeHref }: { d: { inv: any; lines: any[]; 
   return (
     <div className="detail" id="detalle">
       <div className="pdfpane">
-      <div className="fn">📄 {inv.pdf_name ?? "factura.pdf"} · <a className="rowlink" href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer">Abrir en pestaña nueva</a></div>        {inv.has_pdf ? (
+        <div className="fn">
+          📄 {inv.pdf_name ?? "factura.pdf"} ·{" "}
+          <a className="rowlink" href={`/api/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer">
+            Abrir en pestaña nueva
+          </a>
+        </div>
+        {inv.has_pdf ? (
           <iframe src={`/api/invoices/${inv.id}/pdf`} title="PDF de la factura" />
         ) : (
           <div className="empty">Sin PDF adjunto</div>
@@ -27,8 +41,13 @@ export default function Detail({ d, closeHref }: { d: { inv: any; lines: any[]; 
       </div>
 
       <div className="formpane">
-      <div className="dh">
-          {closeHref && <Link href={closeHref} className="btn sm" style={{ float: "right" }}>✕ Minimizar</Link>}          <h3>
+        <div className="dh">
+          {closeHref && (
+            <Link href={closeHref} className="btn sm" style={{ float: "right" }}>
+              ✕ Minimizar
+            </Link>
+          )}
+          <h3>
             {inv.supplier_name || "Proveedor sin identificar"}
             <small>{inv.invoice_number}</small>
           </h3>
