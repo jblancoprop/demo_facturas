@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
-import { STATUS, eur } from "@/lib/db";
+import { STATUS } from "@/lib/db";
+import LinesEditor from "./LinesEditor";
 import { saveInvoice, validateInvoice, approveInvoice, rejectInvoice, reopenInvoice, postInvoice } from "@/app/actions";
 
 export const Badge = ({ s }: { s: string }) => (
@@ -18,8 +19,6 @@ export default function Detail({
   const ed = inv.status === "pendiente";
   const canEdit = inv.status === "pendiente" || inv.status === "pendiente_aprobacion";
   const next = approvals.findIndex((a: any) => a.decision === "pending");
-  const sumLines = lines.reduce((a, l) => a + Number(l.amount), 0);
-  const mismatch = lines.length > 0 && Math.abs(sumLines - Number(inv.base)) > 0.02;
   const noSup = ed && !inv.supplier_name;
   const noNif = ed && !inv.supplier_nif;
   const log = inv.posting_type === "logistico";
@@ -89,36 +88,8 @@ export default function Detail({
                 <input value={`${inv.customer_name ?? ""} · ${inv.customer_nif ?? ""}`} readOnly disabled /></label>
             </div>
 
-            <table className="tbl lines">
-              <thead>
-                <tr><th>Descripción</th><th>Código</th><th className="r">Uds</th><th className="r">Precio</th>
-                  <th className="r">IVA %</th><th className="r">Subtotal</th></tr>
-              </thead>
-              <tbody>
-                {lines.map((l) => (
-                  <tr key={l.id} className={l.issue || !l.internal_code ? "iss" : ""}>
-                    <td>
-                      <input type="hidden" name="line_id" value={l.id} />
-                      <input name={`desc_${l.id}`} defaultValue={l.description ?? ""} />
-                      {l.issue && <div className="iss-t">{l.issue}</div>}
-                    </td>
-                    <td><input name={`code_${l.id}`} defaultValue={l.internal_code ?? ""} placeholder="sin match" style={{ width: 96 }} /></td>
-                    <td className="r"><input name={`qty_${l.id}`} type="number" step="any" defaultValue={Number(l.qty)} style={{ width: 72, textAlign: "right" }} /></td>
-                    <td className="r"><input name={`pu_${l.id}`} type="number" step="any" defaultValue={Number(l.unit_price)} style={{ width: 84, textAlign: "right" }} /></td>
-                    <td className="r"><input name={`vat_${l.id}`} type="number" step="any" defaultValue={Number(l.vat_rate)} style={{ width: 62, textAlign: "right" }} /></td>
-                    <td className="r num">{eur(l.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <LinesEditor lines={lines} savedBase={Number(inv.base)} savedVat={Number(inv.vat)} savedTotal={Number(inv.total)} />
           </fieldset>
-
-          <div className="tot">
-            <div><span className="c-mut">Base imponible</span><b>{eur(inv.base)}</b></div>
-            <div><span className="c-mut">IVA</span><b>{eur(inv.vat)}</b></div>
-            <div className="g"><span>Total</span><span>{eur(inv.total)}</span></div>
-            {mismatch && <div className="issue">La suma de líneas ({eur(sumLines)}) no cuadra con la base.</div>}
-          </div>
 
           {canEdit && (
             <div className="act">
