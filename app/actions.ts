@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
 import { syncExcel } from "@/lib/sync";
+import { parseNum } from "@/lib/num";
 
 const EXCEL_ESTADO: Record<string, string> = {
   pendiente: "Revisión manual",
@@ -12,10 +13,7 @@ const EXCEL_ESTADO: Record<string, string> = {
   contabilizada: "Contabilizada",
 };
 
-const num = (x: any) => {
-  const v = Number(String(x ?? 0).replace(",", "."));
-  return isNaN(v) ? 0 : v;
-};
+const num = parseNum;
 const txt = (x: any) => String(x ?? "").trim();
 const log = (id: string, event: string, detail?: string | null) =>
   sql`insert into invoice_events (invoice_id, event, actor, detail) values (${id}, ${event}, 'Finanzas', ${detail ?? null})`;

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { parseNum as num, fmtNum } from "@/lib/num";
 
 type Line = {
   id: number;
@@ -13,10 +14,6 @@ type Line = {
 
 // Local a propósito: lib/db importa el driver de Neon y no puede ir al navegador.
 const eur = (n: number) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(n || 0);
-const num = (s: string) => {
-  const v = parseFloat(String(s).replace(",", "."));
-  return isNaN(v) ? 0 : v;
-};
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 type Adjustment = { concepto: string; importe: number };
@@ -26,7 +23,11 @@ export default function LinesEditor({
 }: { lines: Line[]; adjustments: Adjustment[]; savedBase: number; savedVat: number; savedTotal: number }) {
   const adjSum = r2(adjustments.reduce((a, x) => a + Number(x.importe || 0), 0));
   const [v, setV] = useState(() =>
-    lines.map((l) => ({ q: String(Number(l.qty)), p: String(Number(l.unit_price)), t: String(Number(l.vat_rate)) }))
+    lines.map((l) => ({
+      q: fmtNum(Number(l.qty), 0, 3),
+      p: fmtNum(Number(l.unit_price), 2, 4),
+      t: fmtNum(Number(l.vat_rate), 0, 2),
+    }))
   );
   const set = (i: number, k: "q" | "p" | "t", val: string) =>
     setV((a) => a.map((x, j) => (j === i ? { ...x, [k]: val } : x)));
@@ -57,9 +58,9 @@ export default function LinesEditor({
                 {l.issue && <div className="iss-t">{l.issue}</div>}
               </td>
               <td><input name={`code_${l.id}`} defaultValue={l.internal_code ?? ""} placeholder="sin match" style={{ width: 96 }} /></td>
-              <td className="r"><input name={`qty_${l.id}`} type="number" step="any" value={v[i].q} onChange={(e) => set(i, "q", e.target.value)} style={{ width: 72, textAlign: "right" }} /></td>
-              <td className="r"><input name={`pu_${l.id}`} type="number" step="any" value={v[i].p} onChange={(e) => set(i, "p", e.target.value)} style={{ width: 84, textAlign: "right" }} /></td>
-              <td className="r"><input name={`vat_${l.id}`} type="number" step="any" value={v[i].t} onChange={(e) => set(i, "t", e.target.value)} style={{ width: 62, textAlign: "right" }} /></td>
+              <td className="r"><input name={`qty_${l.id}`} type="text" inputMode="decimal" value={v[i].q} onChange={(e) => set(i, "q", e.target.value)} style={{ width: 72, textAlign: "right" }} /></td>
+              <td className="r"><input name={`pu_${l.id}`} type="text" inputMode="decimal" value={v[i].p} onChange={(e) => set(i, "p", e.target.value)} style={{ width: 84, textAlign: "right" }} /></td>
+              <td className="r"><input name={`vat_${l.id}`} type="text" inputMode="decimal" value={v[i].t} onChange={(e) => set(i, "t", e.target.value)} style={{ width: 62, textAlign: "right" }} /></td>
               <td className="r num">{eur(amt[i])}</td>
             </tr>
           ))}
