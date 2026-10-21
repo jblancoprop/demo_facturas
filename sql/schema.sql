@@ -7,6 +7,7 @@ create table if not exists invoices (
   customer_name text, customer_nif text,
   invoice_number text, invoice_date text,
   base numeric(14,2) default 0, vat numeric(14,2) default 0, total numeric(14,2) default 0,
+  adjustments jsonb not null default '[]'::jsonb, -- [{concepto, importe}] importe con signo (IRPF, descuentos, recargos...)
   po_number text, posting_type text default 'financiero',
   status text not null default 'pendiente',
   confidence text, issues text, rejection_reason text,

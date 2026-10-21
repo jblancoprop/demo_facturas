@@ -67,6 +67,8 @@ async function persist(fd: FormData) {
   }
   base = Math.round(base * 100) / 100;
   vat = Math.round(vat * 100) / 100;
+  const [{ adjustments }] = await sql`select coalesce(adjustments, '[]'::jsonb) as adjustments from invoices where id = ${id}`;
+  const adj = Math.round(((adjustments as any[]) ?? []).reduce((a, x) => a + num(x.importe), 0) * 100) / 100;
 
   stmts.push(sql`update invoices set
     supplier_name = ${txt(fd.get("supplier_name"))}, supplier_nif = ${txt(fd.get("supplier_nif"))},
@@ -75,7 +77,7 @@ async function persist(fd: FormData) {
     posting_type = case when ${po}::text <> '' then 'logistico' else 'financiero' end,
     base = case when ${lineIds.length}::int > 0 then ${base}::numeric else base end,
     vat = case when ${lineIds.length}::int > 0 then ${vat}::numeric else vat end,
-    total = case when ${lineIds.length}::int > 0 then ${base + vat}::numeric else total end,
+    total = case when ${lineIds.length}::int > 0 then ${Math.round((base + vat + adj) * 100) / 100}::numeric else total end,
     updated_at = now()
     where id = ${id}`);
   stmts.push(log(id, "editada", "Cabecera y líneas actualizadas"));
