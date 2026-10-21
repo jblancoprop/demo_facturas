@@ -1,13 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
+import { parseNum } from "@/lib/num";
 
 export const maxDuration = 30;
 
-const num = (x: any) => {
-  const v = Number(String(x ?? 0).replace(",", "."));
-  return isNaN(v) ? 0 : v;
-};
+const num = parseNum;
 
 export async function POST(req: Request) {
   if (!process.env.INGEST_API_KEY || req.headers.get("x-api-key") !== process.env.INGEST_API_KEY) {
