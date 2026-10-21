@@ -5,7 +5,10 @@ import Tabs from "@/components/Tabs";
 import { sql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "HIPRA Finances · Monitor de facturas" };
+export const metadata: Metadata = {
+  title: "HIPRA Finances · Monitor de facturas",
+  icons: { icon: "/pt-logo.jpg" },
+};
 
 const exo = Exo_2({ subsets: ["latin"], weight: ["400", "600", "700"], variable: "--font-exo" });
 const plex = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-plex" });
