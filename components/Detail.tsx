@@ -88,7 +88,13 @@ export default function Detail({
                 <input value={`${inv.customer_name ?? ""} · ${inv.customer_nif ?? ""}`} readOnly disabled /></label>
             </div>
 
-            <LinesEditor lines={lines} savedBase={Number(inv.base)} savedVat={Number(inv.vat)} savedTotal={Number(inv.total)} />
+            <LinesEditor
+              lines={lines}
+              adjustments={inv.adjustments ?? []}
+              savedBase={Number(inv.base)}
+              savedVat={Number(inv.vat)}
+              savedTotal={Number(inv.total)}
+            />
           </fieldset>
 
           {canEdit && (

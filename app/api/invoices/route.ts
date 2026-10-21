@@ -30,16 +30,19 @@ export async function POST(req: Request) {
   const id: string = d.id ?? "F-" + Date.now();
   const status = d.incidencias || d.estado === "Revisión manual" ? "pendiente" : "pendiente_aprobacion";
   const posting = d.po_number ? "logistico" : "financiero";
+  const adjustments = (Array.isArray(d.ajustes) ? d.ajustes : [])
+    .map((a: any) => ({ concepto: String(a?.concepto ?? "").trim(), importe: num(a?.importe) }))
+    .filter((a: { concepto: string; importe: number }) => a.concepto || a.importe);
 
   const ins = await sql`
     insert into invoices (id, pdf_name, pdf_b64, received_at, sender, subject,
       supplier_name, supplier_nif, customer_name, customer_nif, invoice_number, invoice_date,
-      base, vat, total, po_number, posting_type, status, confidence, issues)
+      base, vat, total, adjustments, po_number, posting_type, status, confidence, issues)
     values (${id}, ${d.nombre_pdf ?? null}, ${pdf}, ${d.fecha_recepcion ?? new Date().toISOString()},
       ${d.remitente ?? null}, ${d.asunto ?? null},
       ${d.proveedor ?? null}, ${d.nif_proveedor ?? null}, ${d.nombre_cliente ?? null}, ${d.nif_cliente ?? null},
       ${d.numero_factura ?? null}, ${d.fecha_factura ?? null},
-      ${num(d.base_imponible)}, ${num(d.cuota_iva)}, ${num(d.total)},
+      ${num(d.base_imponible)}, ${num(d.cuota_iva)}, ${num(d.total)}, ${JSON.stringify(adjustments)}::jsonb,
       ${d.po_number ?? null}, ${posting}, ${status}, ${d.confianza ?? null}, ${d.incidencias || null})
     on conflict (supplier_nif, invoice_number) do nothing
     returning id`;

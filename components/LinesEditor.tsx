@@ -19,9 +19,12 @@ const num = (s: string) => {
 };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+type Adjustment = { concepto: string; importe: number };
+
 export default function LinesEditor({
-  lines, savedBase, savedVat, savedTotal,
-}: { lines: Line[]; savedBase: number; savedVat: number; savedTotal: number }) {
+  lines, adjustments, savedBase, savedVat, savedTotal,
+}: { lines: Line[]; adjustments: Adjustment[]; savedBase: number; savedVat: number; savedTotal: number }) {
+  const adjSum = r2(adjustments.reduce((a, x) => a + Number(x.importe || 0), 0));
   const [v, setV] = useState(() =>
     lines.map((l) => ({ q: String(Number(l.qty)), p: String(Number(l.unit_price)), t: String(Number(l.vat_rate)) }))
   );
@@ -34,7 +37,7 @@ export default function LinesEditor({
     vat: r2(v.reduce((a, x, i) => a + (amt[i] * num(x.t)) / 100, 0)),
     total: 0,
   };
-  live.total = r2(live.base + live.vat);
+  live.total = r2(live.base + live.vat + adjSum);
   const show = lines.length ? live : { base: savedBase, vat: savedVat, total: savedTotal };
   const dirty = lines.length > 0 && Math.abs(live.total - savedTotal) > 0.005;
 
@@ -66,6 +69,9 @@ export default function LinesEditor({
       <div className="tot">
         <div><span className="c-mut">Base imponible</span><b>{eur(show.base)}</b></div>
         <div><span className="c-mut">IVA</span><b>{eur(show.vat)}</b></div>
+        {adjustments.map((a, i) => (
+          <div key={i}><span className="c-mut">{a.concepto || "Ajuste"}</span><b>{eur(Number(a.importe))}</b></div>
+        ))}
         <div className="g"><span>Total</span><span>{eur(show.total)}</span></div>
         {dirty && <div style={{ color: "var(--amb)", fontSize: 12 }}>Recalculado, sin guardar. Pulsa «Guardar cambios».</div>}
       </div>
