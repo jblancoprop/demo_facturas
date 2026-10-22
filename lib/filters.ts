@@ -6,6 +6,7 @@ import { sql, STATUS } from "./db";
 export type RawFilters = {
   estado?: string; ci?: string; q?: string; prov?: string; canal?: string;
   desde?: string; hasta?: string; min?: string; max?: string;
+  vista?: string; // "semanas" = gráfico semanal; no filtra la tabla
 };
 
 export type Filters = {
@@ -59,6 +60,7 @@ export function keepParams(raw: RawFilters): Record<string, string | undefined> 
     hasta: f.hasta ? raw.hasta : undefined,
     min: f.min !== null ? raw.min : undefined,
     max: f.max !== null ? raw.max : undefined,
+    vista: raw.vista === "semanas" ? "semanas" : undefined,
   };
 }
 
