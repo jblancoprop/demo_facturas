@@ -149,3 +149,4 @@ a.kpi.link:hover{border-color:var(--cy)}
 .chart .b .stack i{min-height:0;border-radius:0;width:100%}
 .chart .b span{text-align:center;line-height:1.2}
 .chart .b span small{font-size:11px;opacity:.8}
+.chart .b.fut span{opacity:.4}
