@@ -4,8 +4,8 @@ export const sql = neon(process.env.DATABASE_URL!);
 
 // Los valores internos (claves) no cambian: n8n, el Excel y el webhook dependen de ellos. Solo cambia el texto que ve la gente.
 export const STATUS = {
-  pendiente: "Revisión manual",
-  pendiente_aprobacion: "Pendiente aprobación",
+  pendiente: "Incidencia",
+  pendiente_aprobacion: "En aprobación",
   aprobada: "Aprobada",
   rechazada: "Rechazada",
   contabilizada: "Contabilizada",

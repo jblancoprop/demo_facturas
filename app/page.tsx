@@ -7,6 +7,7 @@ import { APROBADAS, countByStatus, keepParams, listInvoices, parseFilters, type 
 import { postAllFiltered, postSelected } from "./actions";
 import { ConfirmButton, SelectAll } from "@/components/BulkControls";
 import Detail, { Badge } from "@/components/Detail";
+import FilterForm from "@/components/FilterForm";
 
 export const dynamic = "force-dynamic";
 const PAGE = 25;
@@ -22,6 +23,8 @@ export default async function Monitor({
 
   // Totales de toda la bandeja (no dependen de los filtros).
   const [k] = await sql`select count(*)::int as n,
+    coalesce(sum(total) filter (where status = 'pendiente'), 0) as inc_amt,
+    count(*) filter (where status = 'pendiente')::int as inc_n,
     coalesce(sum(total) filter (where status = 'pendiente_aprobacion'), 0) as pend_amt,
     count(*) filter (where status = 'pendiente_aprobacion')::int as pend_n,
     coalesce(sum(total) filter (where status in ('aprobada','contabilizada')), 0) as apr_amt,
@@ -29,10 +32,28 @@ export default async function Monitor({
     count(*) filter (where status = 'aprobada')::int as por_contabilizar,
     coalesce(sum(total) filter (where status = 'contabilizada'), 0) as cont_amt,
     count(*) filter (where status = 'contabilizada')::int as cont_n from invoices`;
-  const days = await sql`select to_char(g, 'YYYY-MM-DD') as d, count(i.id)::int as c
-    from generate_series((now() at time zone 'Europe/Madrid')::date - 6, (now() at time zone 'Europe/Madrid')::date, interval '1 day') g
-    left join invoices i on (i.received_at at time zone 'Europe/Madrid')::date = g::date
-    group by g order by g`;
+  // Facturas recibidas por día (14 días) o por semana (8 semanas), separadas por lo que han acabado siendo.
+  const weekly = keep.vista === "semanas";
+  const bars = weekly
+    ? await sql`select to_char(g, 'YYYY-MM-DD') as d,
+        count(i.id)::int as c,
+        count(*) filter (where i.status = 'pendiente')::int as inc,
+        count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
+        count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
+        count(*) filter (where i.status = 'rechazada')::int as rej
+      from generate_series(date_trunc('week', now() at time zone 'Europe/Madrid') - interval '7 weeks',
+                           date_trunc('week', now() at time zone 'Europe/Madrid'), interval '1 week') g
+      left join invoices i on date_trunc('week', i.received_at at time zone 'Europe/Madrid') = g
+      group by g order by g`
+    : await sql`select to_char(g, 'YYYY-MM-DD') as d,
+        count(i.id)::int as c,
+        count(*) filter (where i.status = 'pendiente')::int as inc,
+        count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
+        count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
+        count(*) filter (where i.status = 'rechazada')::int as rej
+      from generate_series((now() at time zone 'Europe/Madrid')::date - 13, (now() at time zone 'Europe/Madrid')::date, interval '1 day') g
+      left join invoices i on (i.received_at at time zone 'Europe/Madrid')::date = g::date
+      group by g order by g`;
   const top = await sql`select supplier_name as s, sum(total) as t, count(*)::int as n from invoices
     where status in ('aprobada','contabilizada') and coalesce(supplier_name, '') <> ''
     group by 1 order by t desc limit 5`;
@@ -49,9 +70,23 @@ export default async function Monitor({
   const detail = id && rows.some((r) => r.id === id) ? await getDetail(id) : null;
   const bulkN = inScope.includes("aprobada") ? cnt.aprobada ?? 0 : 0;
 
-  const maxD = Math.max(1, ...days.map((x) => x.c as number));
+  const maxD = Math.max(1, ...bars.map((x) => x.c as number));
+  const sumBars = bars.reduce((a, x) => a + (x.c as number), 0);
   const pg = (n: number) => (n > 1 ? String(n) : undefined);
-  const hasFilter = Object.values(keep).some(Boolean);
+  const tableKeep = { ...keep, vista: undefined }; // la vista del gráfico no filtra la tabla
+  const hasFilter = Object.values(tableKeep).some(Boolean);
+  const barLabel = (d: string) => {
+    const dt = new Date(`${d}T12:00:00`);
+    const dd = dt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+    return weekly ? { top: dd, sub: "sem." } : { top: dt.toLocaleDateString("es-ES", { weekday: "short" }).slice(0, 2), sub: dd };
+  };
+  const kpi = (estado: string, label: string, n: unknown, amount: unknown, sub: string, cls: string) => (
+    <Link className="panel kpi link" href={`/${qs({ ...keep, estado, p: undefined, id: undefined })}#facturas`}>
+      <div className="k">{label}</div>
+      <div className={`kv ${cls}`}>{fmtInt(n)}<small> {(n as number) === 1 ? "factura" : "facturas"}</small></div>
+      <div className="ks c-mut">{eur(amount)}{sub}</div>
+    </Link>
+  );
   const chip = (estado: string | undefined, label: string, n: number, color?: string) => (
     <Link key={label} href={`/${qs({ ...keep, estado, p: undefined, id: undefined })}#facturas`}
       className={`chip ${keep.estado === estado ? "on" : ""}`}>
@@ -62,23 +97,48 @@ export default async function Monitor({
   return (
     <>
       <div className="row r4">
-        <div className="panel kpi"><div className="k">Facturas recibidas</div><div className="kv">{fmtInt(k.n)}</div><div className="ks c-mut">en total</div></div>
-        <div className="panel kpi"><div className="k">Pendiente de aprobar</div><div className="kv c-cy">{eur(k.pend_amt)}</div><div className="ks c-mut">{fmtInt(k.pend_n)} facturas en el circuito</div></div>
-        <div className="panel kpi"><div className="k">Aprobado</div><div className="kv c-grn">{eur(k.apr_amt)}</div><div className="ks c-mut">{fmtInt(k.apr_n)} facturas · {fmtInt(k.por_contabilizar)} por contabilizar</div></div>
-        <div className="panel kpi"><div className="k">Contabilizado en SAP</div><div className="kv">{eur(k.cont_amt)}</div><div className="ks c-mut">{fmtInt(k.cont_n)} facturas</div></div>
+        {kpi("pendiente", "Incidencias por revisar", k.inc_n, k.inc_amt, "", "c-amb")}
+        {kpi("pendiente_aprobacion", "Pendientes de aprobar", k.pend_n, k.pend_amt, "", "c-cy")}
+        {kpi(APROBADAS, "Aprobadas", k.apr_n, k.apr_amt, ` · ${fmtInt(k.por_contabilizar)} por contabilizar`, "c-grn")}
+        {kpi("contabilizada", "Contabilizadas en SAP", k.cont_n, k.cont_amt, "", "")}
       </div>
 
       <div className="row r2">
         <div className="panel">
-          <h3>Facturas recibidas · últimos 7 días</h3>
+          <div className="phead">
+            <h3>Facturas recibidas · {weekly ? "últimas 8 semanas" : "últimos 14 días"}
+              <small className="c-mut"> · {fmtInt(sumBars)} en este periodo, {fmtInt(k.n)} en total</small></h3>
+            <div className="seg">
+              <Link className={!weekly ? "on" : ""} href={`/${qs({ ...keep, vista: undefined })}`}>Días</Link>
+              <Link className={weekly ? "on" : ""} href={`/${qs({ ...keep, vista: "semanas" })}`}>Semanas</Link>
+            </div>
+          </div>
+          <div className="legend">
+            <span><i style={{ background: COLOR.pendiente }} />Incidencia</span>
+            <span><i style={{ background: COLOR.pendiente_aprobacion }} />En aprobación</span>
+            <span><i style={{ background: COLOR.aprobada }} />Aprobada o contabilizada</span>
+            <span><i style={{ background: COLOR.rechazada }} />Rechazada</span>
+          </div>
           <div className="chart">
-            {days.map((x) => (
-              <div className="b" key={x.d as string}>
-                <em>{fmtInt(x.c)}</em>
-                <i style={{ height: `${((x.c as number) / maxD) * 100}%` }} />
-                <span>{new Date(`${x.d}T12:00:00`).toLocaleDateString("es-ES", { weekday: "short" }).slice(0, 2)}</span>
-              </div>
-            ))}
+            {bars.map((x) => {
+              const lab = barLabel(x.d as string);
+              const parts = [
+                [x.inc, COLOR.pendiente, "incidencia"], [x.apr, COLOR.pendiente_aprobacion, "en aprobación"],
+                [x.ok, COLOR.aprobada, "aprobada"], [x.rej, COLOR.rechazada, "rechazada"],
+              ] as [number, string, string][];
+              const when = weekly ? `Semana del ${lab.top}` : `${lab.top} ${lab.sub}`;
+              const tip = `${when}: ${x.c} recibidas` +
+                parts.filter(([n]) => n).map(([n, , t]) => ` · ${n} ${t}`).join("");
+              return (
+                <div className="b" key={x.d as string} title={tip}>
+                  <em>{x.c ? fmtInt(x.c) : ""}</em>
+                  <div className="stack" style={{ height: `${((x.c as number) / maxD) * 100}%` }}>
+                    {parts.filter(([n]) => n > 0).map(([n, c, t]) => <i key={t} style={{ flex: n, background: c }} />)}
+                  </div>
+                  <span>{lab.top}<br /><small>{lab.sub}</small></span>
+                </div>
+              );
+            })}
           </div>
         </div>
         <div className="panel">
@@ -102,8 +162,9 @@ export default async function Monitor({
           {chip(APROBADAS, "Aprobado (total)", (cnt.aprobada ?? 0) + (cnt.contabilizada ?? 0))}
         </div>
 
-        <form className="filters" action="/">
+        <FilterForm>
           {keep.estado && <input type="hidden" name="estado" value={keep.estado} />}
+          {keep.vista && <input type="hidden" name="vista" value={keep.vista} />}
           <label>Proveedor
             <select name="prov" defaultValue={keep.prov ?? ""}>
               <option value="">Todos</option>
@@ -133,15 +194,15 @@ export default async function Monitor({
           <label>Importe máximo (€)<input name="max" inputMode="decimal" defaultValue={keep.max ?? ""} placeholder="Sin límite" /></label>
           <div className="factions">
             <button className="btn pri">Filtrar</button>
-            {hasFilter && <Link className="btn" href="/#facturas">Limpiar</Link>}
+            {hasFilter && <Link className="btn" href={`/${qs({ vista: keep.vista })}#facturas`}>Limpiar</Link>}
             <span style={{ flex: 1 }} />
-            <a className="btn out" href={`/api/export${qs(keep)}`}>↓ Exportar CSV</a>
+            <a className="btn out" href={`/api/export${qs(tableKeep)}`}>↓ Exportar CSV</a>
           </div>
-        </form>
+        </FilterForm>
 
         {bulkN > 0 && (
           <form id="bulk" className="bulk">
-            {Object.entries(keep).map(([key, v]) => v ? <input key={key} type="hidden" name={`f_${key}`} value={v} /> : null)}
+            {Object.entries(tableKeep).map(([key, v]) => v ? <input key={key} type="hidden" name={`f_${key}`} value={v} /> : null)}
             <span><b>{fmtInt(bulkN)}</b> {bulkN === 1 ? "factura aprobada pendiente" : "facturas aprobadas pendientes"} de contabilizar en SAP</span>
             <span style={{ flex: 1 }} />
             <ConfirmButton className="btn" action={postSelected}
