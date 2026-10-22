@@ -7,7 +7,7 @@ import { sql } from "@/lib/db";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "HIPRA Finanzas · Monitor de facturas",
-  icons: { icon: "/pt-logo.jpg" },
+  icons: { icon: [{ url: "/pt-logo.png", type: "image/png" }] },
 };
 
 const exo = Exo_2({ subsets: ["latin"], weight: ["400", "600", "700"], variable: "--font-exo" });
