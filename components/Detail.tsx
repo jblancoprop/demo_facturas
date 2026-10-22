@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { STATUS } from "@/lib/db";
 import LinesEditor from "./LinesEditor";
+import { missingFields } from "@/lib/required";
 import { saveInvoice, validateInvoice, approveInvoice, rejectInvoice, reopenInvoice, postInvoice } from "@/app/actions";
 
 export const Badge = ({ s }: { s: string }) => (
@@ -19,8 +20,12 @@ export default function Detail({
   const ed = inv.status === "pendiente";
   const canEdit = inv.status === "pendiente" || inv.status === "pendiente_aprobacion";
   const next = approvals.findIndex((a: any) => a.decision === "pending");
-  const noSup = ed && !inv.supplier_name;
-  const noNif = ed && !inv.supplier_nif;
+  // Datos obligatorios: sin ellos no se puede validar ni aprobar (lo comprueba también el servidor).
+  const missing = canEdit ? missingFields(inv) : [];
+  const blocked = missing.length > 0;
+  const bad = (k: string) => missing.some((m) => m.startsWith(k));
+  const noSup = bad("proveedor");
+  const noNif = bad("NIF");
   const log = inv.posting_type === "logistico";
 
   return (
@@ -59,6 +64,11 @@ export default function Detail({
         </div>
 
         {inv.status === "rechazada" && <div className="ban red">Rechazada: {inv.rejection_reason}</div>}
+        {blocked && (
+          <div className="ban red">
+            ⚠ Faltan datos obligatorios: {missing.join(", ")}. No se puede {ed ? "validar" : "aprobar"} hasta completarlos y guardar.
+          </div>
+        )}
         {ed && inv.issues && <div className="ban red">⚠ {inv.issues}</div>}
         {inv.status === "pendiente_aprobacion" && (
           <div className="ban blue">
@@ -80,14 +90,19 @@ export default function Detail({
                 <input name="supplier_name" className={noSup ? "bad" : ""} defaultValue={inv.supplier_name ?? ""} /></label>
               <label className={noNif ? "bad" : ""}>NIF proveedor *
                 <input name="supplier_nif" className={noNif ? "bad" : ""} defaultValue={inv.supplier_nif ?? ""} /></label>
-              <label>Nº factura<input name="invoice_number" defaultValue={inv.invoice_number ?? ""} /></label>
-              <label>Fecha factura<input name="invoice_date" defaultValue={inv.invoice_date ?? ""} /></label>
+              <label className={bad("número") ? "bad" : ""}>Nº factura *<input name="invoice_number" className={bad("número") ? "bad" : ""} defaultValue={inv.invoice_number ?? ""} /></label>
+              <label className={bad("fecha") ? "bad" : ""}>Fecha factura * (DD/MM/AAAA)<input name="invoice_date" className={bad("fecha") ? "bad" : ""} placeholder="DD/MM/AAAA" defaultValue={inv.invoice_date ?? ""} /></label>
               <label>Nº pedido (PO) · vacío = circuito financiero
                 <input name="po_number" defaultValue={inv.po_number ?? ""} placeholder="sin pedido" /></label>
               <label>Cliente en factura
                 <input value={`${inv.customer_name ?? ""} · ${inv.customer_nif ?? ""}`} readOnly disabled /></label>
             </div>
 
+            {lines.length === 0 && (
+              <label className={bad("importe") ? "bad" : ""}>Importe total * (€)
+                <input name="total_manual" inputMode="decimal" className={bad("importe") ? "bad" : ""}
+                  defaultValue={Number(inv.total) ? String(inv.total) : ""} placeholder="0,00" /></label>
+            )}
             <LinesEditor
               lines={lines}
               adjustments={inv.adjustments ?? []}
@@ -100,7 +115,7 @@ export default function Detail({
           {canEdit && (
             <div className="act">
               <button className="btn" formAction={saveInvoice}>Guardar cambios</button>
-              {ed && <button className="btn pri" formAction={validateInvoice}>Validar y enviar a aprobación →</button>}
+              {ed && <button className="btn pri" formAction={validateInvoice} disabled={blocked} title={blocked ? "Faltan datos obligatorios" : undefined}>Validar y enviar a aprobación →</button>}
             </div>
           )}
         </form>
@@ -139,7 +154,7 @@ export default function Detail({
             <form action={approveInvoice} className="inline">
               <input type="hidden" name="id" value={inv.id} />
               <input name="comment" placeholder="Comentario (opcional)" />
-              <button className="btn pri">Aprobar nivel {next + 1}</button>
+              <button className="btn pri" disabled={blocked} title={blocked ? "Faltan datos obligatorios" : undefined}>Aprobar nivel {next + 1}</button>
             </form>
           )}
           {inv.status === "aprobada" && (
