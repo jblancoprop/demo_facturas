@@ -6,7 +6,7 @@ import { sql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: "HIPRA Finances · Monitor de facturas",
+  title: "HIPRA Finanzas · Monitor de facturas",
   icons: { icon: "/pt-logo.jpg" },
 };
 
@@ -22,7 +22,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <div className="shell">
           <div className="top">
-            <div className="brand">HIPRA <span>Finances</span></div>
+            <div className="brand">HIPRA <span>Finanzas</span></div>
             <div className="ctx">Facturas de proveedor</div>
             <div className="who">Finanzas</div>
           </div>

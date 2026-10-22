@@ -8,6 +8,7 @@ import { postAllFiltered, postSelected } from "./actions";
 import { ConfirmButton, SelectAll } from "@/components/BulkControls";
 import Detail, { Badge } from "@/components/Detail";
 import FilterForm from "@/components/FilterForm";
+import { VISTAS, VISTA_DEFECTO, parseVista, type Vista } from "@/lib/periods";
 
 export const dynamic = "force-dynamic";
 const PAGE = 25;
@@ -32,28 +33,22 @@ export default async function Monitor({
     count(*) filter (where status = 'aprobada')::int as por_contabilizar,
     coalesce(sum(total) filter (where status = 'contabilizada'), 0) as cont_amt,
     count(*) filter (where status = 'contabilizada')::int as cont_n from invoices`;
-  // Facturas recibidas por día (14 días) o por semana (8 semanas), separadas por lo que han acabado siendo.
-  const weekly = keep.vista === "semanas";
-  const bars = weekly
-    ? await sql`select to_char(g, 'YYYY-MM-DD') as d,
-        count(i.id)::int as c,
-        count(*) filter (where i.status = 'pendiente')::int as inc,
-        count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
-        count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
-        count(*) filter (where i.status = 'rechazada')::int as rej
-      from generate_series(date_trunc('week', now() at time zone 'Europe/Madrid') - interval '7 weeks',
-                           date_trunc('week', now() at time zone 'Europe/Madrid'), interval '1 week') g
-      left join invoices i on date_trunc('week', i.received_at at time zone 'Europe/Madrid') = g
-      group by g order by g`
-    : await sql`select to_char(g, 'YYYY-MM-DD') as d,
-        count(i.id)::int as c,
-        count(*) filter (where i.status = 'pendiente')::int as inc,
-        count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
-        count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
-        count(*) filter (where i.status = 'rechazada')::int as rej
-      from generate_series((now() at time zone 'Europe/Madrid')::date - 13, (now() at time zone 'Europe/Madrid')::date, interval '1 day') g
-      left join invoices i on (i.received_at at time zone 'Europe/Madrid')::date = g::date
-      group by g order by g`;
+  // Facturas recibidas en el periodo elegido (por día, semana o mes), separadas por lo que han acabado siendo.
+  const vista = parseVista(sp.vista);
+  const per = VISTAS[vista];
+  const bars = await sql`select to_char(g, 'YYYY-MM-DD') as d,
+      count(i.id)::int as c,
+      count(*) filter (where i.status = 'pendiente')::int as inc,
+      count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
+      count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
+      count(*) filter (where i.status = 'rechazada')::int as rej
+    from generate_series(
+      case when ${per.back}::text is null then date_trunc('year', now() at time zone 'Europe/Madrid')
+           else date_trunc(${per.unit}::text, now() at time zone 'Europe/Madrid') - ${per.back}::interval end,
+      date_trunc(${per.unit}::text, now() at time zone 'Europe/Madrid'),
+      ${per.step}::interval) g
+    left join invoices i on date_trunc(${per.unit}::text, i.received_at at time zone 'Europe/Madrid') = g
+    group by g order by g`;
   const top = await sql`select supplier_name as s, sum(total) as t, count(*)::int as n from invoices
     where status in ('aprobada','contabilizada') and coalesce(supplier_name, '') <> ''
     group by 1 order by t desc limit 5`;
@@ -73,12 +68,17 @@ export default async function Monitor({
   const maxD = Math.max(1, ...bars.map((x) => x.c as number));
   const sumBars = bars.reduce((a, x) => a + (x.c as number), 0);
   const pg = (n: number) => (n > 1 ? String(n) : undefined);
-  const tableKeep = { ...keep, vista: undefined }; // la vista del gráfico no filtra la tabla
+  const tableKeep = { ...keep, vista: undefined }; // el periodo del gráfico no filtra la tabla
   const hasFilter = Object.values(tableKeep).some(Boolean);
   const barLabel = (d: string) => {
     const dt = new Date(`${d}T12:00:00`);
-    const dd = dt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
-    return weekly ? { top: dd, sub: "sem." } : { top: dt.toLocaleDateString("es-ES", { weekday: "short" }).slice(0, 2), sub: dd };
+    const dm = dt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+    if (per.unit === "month")
+      return { top: dt.toLocaleDateString("es-ES", { month: "short" }).replace(".", ""), sub: dt.toLocaleDateString("es-ES", { year: "2-digit" }),
+        when: dt.toLocaleDateString("es-ES", { month: "long", year: "numeric" }) };
+    if (per.unit === "week") return { top: dm, sub: "sem.", when: `Semana del ${dm}` };
+    const wd = dt.toLocaleDateString("es-ES", { weekday: "short" }).replace(".", "").slice(0, 2);
+    return { top: dt.toLocaleDateString("es-ES", { day: "2-digit" }), sub: wd, when: `${dt.toLocaleDateString("es-ES", { weekday: "long" })} ${dm}` };
   };
   const kpi = (estado: string, label: string, n: unknown, amount: unknown, sub: string, cls: string) => (
     <Link className="panel kpi link" href={`/${qs({ ...keep, estado, p: undefined, id: undefined })}#facturas`}>
@@ -106,11 +106,13 @@ export default async function Monitor({
       <div className="row r2">
         <div className="panel">
           <div className="phead">
-            <h3>Facturas recibidas · {weekly ? "últimas 8 semanas" : "últimos 14 días"}
+            <h3>Facturas recibidas · {per.title}
               <small className="c-mut"> · {fmtInt(sumBars)} en este periodo, {fmtInt(k.n)} en total</small></h3>
             <div className="seg">
-              <Link className={!weekly ? "on" : ""} href={`/${qs({ ...keep, vista: undefined })}`}>Días</Link>
-              <Link className={weekly ? "on" : ""} href={`/${qs({ ...keep, vista: "semanas" })}`}>Semanas</Link>
+              {(Object.keys(VISTAS) as Vista[]).map((v) => (
+                <Link key={v} className={v === vista ? "on" : ""}
+                  href={`/${qs({ ...keep, vista: v === VISTA_DEFECTO ? undefined : v })}`}>{VISTAS[v].label}</Link>
+              ))}
             </div>
           </div>
           <div className="legend">
@@ -126,8 +128,7 @@ export default async function Monitor({
                 [x.inc, COLOR.pendiente, "incidencia"], [x.apr, COLOR.pendiente_aprobacion, "en aprobación"],
                 [x.ok, COLOR.aprobada, "aprobada"], [x.rej, COLOR.rechazada, "rechazada"],
               ] as [number, string, string][];
-              const when = weekly ? `Semana del ${lab.top}` : `${lab.top} ${lab.sub}`;
-              const tip = `${when}: ${x.c} recibidas` +
+              const tip = `${lab.when}: ${x.c} recibidas` +
                 parts.filter(([n]) => n).map(([n, , t]) => ` · ${n} ${t}`).join("");
               return (
                 <div className="b" key={x.d as string} title={tip}>
