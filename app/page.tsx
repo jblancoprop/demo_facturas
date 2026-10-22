@@ -64,7 +64,6 @@ export default async function Monitor({
   // Gráfico: cabecera con el rango real (hasta hoy) y barras pulsables que filtran todo por ese día o mes.
   const bars = sum.bars;
   const sumBars = bars.reduce((a, x) => a + x.c, 0);
-  const peak = bars.reduce((m, x) => (x.c > m.c ? x : m), bars[0] ?? { c: 0, d: "" });
   const firstD = bars[0]?.d;
   const lastD = bars[bars.length - 1]?.d;
   const rango = !firstD ? "" : per.unit === "month"
@@ -157,7 +156,7 @@ export default async function Monitor({
         <div className="panel">
           <div className="phead">
             <h3>Facturas recibidas · {per.title}
-              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo{sumBars > 0 ? `, pico de ${fmtInt(peak.c)}` : ""}</small></h3>
+              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo</small></h3>
             <div className="seg">
               {(Object.keys(VISTAS) as Vista[]).map((v) => (
                 <Link key={v} className={v === vista ? "on" : ""}
