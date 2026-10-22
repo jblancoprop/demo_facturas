@@ -15,12 +15,16 @@ export async function POST(req: Request) {
 
   let d: any;
   let pdf: string | null = null;
+  let pdfName: string | null = null; // nombre del archivo adjunto, por si n8n no manda el resto de datos
   const ct = req.headers.get("content-type") ?? "";
   if (ct.includes("multipart/form-data")) {
     const fd = await req.formData();
     d = JSON.parse(String(fd.get("data")));
     const f = fd.get("pdf");
-    if (f && typeof f !== "string") pdf = Buffer.from(await f.arrayBuffer()).toString("base64");
+    if (f && typeof f !== "string") {
+      pdf = Buffer.from(await f.arrayBuffer()).toString("base64");
+      pdfName = f.name || null;
+    }
   } else {
     d = await req.json();
     pdf = d.pdf_base64 ?? null;
@@ -30,8 +34,10 @@ export async function POST(req: Request) {
   // Aunque n8n diga que todo está bien, sin los datos obligatorios la factura va a Incidencias.
   const missing = missingFields({ supplier_name: d.proveedor, supplier_nif: d.nif_proveedor, invoice_number: d.numero_factura,
     invoice_date: d.fecha_factura, total: d.total });
-  const issues = [d.incidencias, missing.length ? `Faltan datos obligatorios: ${missing.join(", ")}` : ""].filter(Boolean).join("; ");
-  const status = issues || d.estado === "Revisión manual" ? "pendiente" : "pendiente_aprobacion";
+  // Si n8n no pudo analizar el PDF (el agente falló), llega sin resultado: se guarda igualmente como Incidencia con el PDF.
+  const failed = !d.estado && !d.destino;
+  const issues = [failed ? "El proceso automático no ha podido analizar esta factura. Revisa el PDF a mano." : "", d.incidencias, missing.length ? `Faltan datos obligatorios: ${missing.join(", ")}` : ""].filter(Boolean).join("; ");
+  const status = issues || d.estado === "Revisión manual" ? "pendiente" : "pendiente_aprobacion"; // con incidencia o sin resultado, siempre a revisión
   const posting = d.po_number ? "logistico" : "financiero";
   const adjustments = (Array.isArray(d.ajustes) ? d.ajustes : [])
     .map((a: any) => ({ concepto: String(a?.concepto ?? "").trim(), importe: num(a?.importe) }))
@@ -41,7 +47,7 @@ export async function POST(req: Request) {
     insert into invoices (id, pdf_name, pdf_b64, received_at, sender, subject,
       supplier_name, supplier_nif, customer_name, customer_nif, invoice_number, invoice_date,
       base, vat, total, adjustments, po_number, posting_type, status, confidence, issues)
-    values (${id}, ${d.nombre_pdf ?? null}, ${pdf}, ${d.fecha_recepcion ?? new Date().toISOString()},
+    values (${id}, ${d.nombre_pdf ?? pdfName}, ${pdf}, ${d.fecha_recepcion ?? new Date().toISOString()},
       ${d.remitente ?? null}, ${d.asunto ?? null},
       ${d.proveedor ?? null}, ${d.nif_proveedor ?? null}, ${d.nombre_cliente ?? null}, ${d.nif_cliente ?? null},
       ${d.numero_factura ?? null}, ${d.fecha_factura ?? null},
