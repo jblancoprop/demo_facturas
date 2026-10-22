@@ -51,7 +51,7 @@ export function summarize(rows: Row[], range: Range, buckets: Bucket[], unit: "d
 
   return {
     scoped, byStatus, count: scoped.length,
-    pend: sum(["pendiente_aprobacion"]), inc: sum(["pendiente"]), apr: sum(APROBADO), cont: sum(["contabilizada"]),
+    pend: sum(["pendiente_aprobacion"]), inc: sum(["pendiente"]), rej: sum(["rechazada"]), apr: sum(APROBADO), cont: sum(["contabilizada"]),
     porContabilizar: byStatus.aprobada?.n ?? 0, top, bars,
   };
 }

@@ -5,8 +5,8 @@ import { fmtInt } from "@/lib/num";
 import { getDetail } from "@/lib/queries";
 import { APROBADAS, baseRows, keepParams, listInvoices, parseFilters, type RawFilters } from "@/lib/filters";
 import { summarize, type Bucket } from "@/lib/overview";
-import { postAllFiltered, postSelected } from "./actions";
-import { ConfirmButton, SelectAll } from "@/components/BulkControls";
+import { postAllFiltered, postSelected, rejectSelected } from "./actions";
+import { ConfirmButton, RejectButton, SelectAll } from "@/components/BulkControls";
 import Detail, { Badge } from "@/components/Detail";
 import FilterForm from "@/components/FilterForm";
 import ReceivedChart from "@/components/ReceivedChart";
@@ -55,7 +55,9 @@ export default async function Monitor({
   const p = Math.min(Math.max(1, parseInt(pRaw ?? "1") || 1), pages);
   const rows = await listInvoices(f, { limit: PAGE, offset: (p - 1) * PAGE });
   const detail = id && rows.some((r) => r.id === id) ? await getDetail(id) : null;
-  const bulkN = inScope.includes("aprobada") ? cnt.aprobada ?? 0 : 0;
+  const bulkN = inScope.includes("aprobada") ? cnt.aprobada ?? 0 : 0; // aprobadas por contabilizar
+  const MARCABLES = ["pendiente", "pendiente_aprobacion", "aprobada"]; // estados sobre los que se puede actuar en bloque
+  const markN = MARCABLES.filter((s) => inScope.includes(s)).reduce((a, s) => a + (cnt[s] ?? 0), 0);
 
   const tableKeep = { ...keep, vista: undefined }; // el periodo del gráfico no filtra nada
   const hasFilter = Object.values(tableKeep).some(Boolean);
@@ -146,11 +148,12 @@ export default async function Monitor({
         </FilterForm>
       </div>
 
-      <div className="row r4">
+      <div className="row r5">
         {kpi("pendiente", "Incidencias por revisar", sum.inc.n, sum.inc.amt, "", "c-amb")}
         {kpi("pendiente_aprobacion", "Pendientes de aprobar", sum.pend.n, sum.pend.amt, "", "c-cy")}
         {kpi(APROBADAS, "Aprobadas", sum.apr.n, sum.apr.amt, ` · ${fmtInt(sum.porContabilizar)} por contabilizar`, "c-grn")}
         {kpi("contabilizada", "Contabilizadas en SAP", sum.cont.n, sum.cont.amt, "", "")}
+        {kpi("rechazada", "Rechazadas", sum.rej.n, sum.rej.amt, "", "c-red")}
       </div>
 
       <div className="row r2">
@@ -191,24 +194,30 @@ export default async function Monitor({
           {chip(APROBADAS, "Aprobadas (total)", (cnt.aprobada ?? 0) + (cnt.contabilizada ?? 0))}
         </div>
 
-        {bulkN > 0 && (
+        {markN > 0 && (
           <form id="bulk" className="bulk">
             {Object.entries(tableKeep).map(([key, v]) => v ? <input key={key} type="hidden" name={`f_${key}`} value={v} /> : null)}
-            <span><b>{fmtInt(bulkN)}</b> {bulkN === 1 ? "factura aprobada pendiente" : "facturas aprobadas pendientes"} de contabilizar en SAP</span>
+            <input type="hidden" name="reason" defaultValue="" />
+            <span>Marca facturas en la tabla para actuar sobre varias a la vez.{bulkN > 0 && <> <b>{fmtInt(bulkN)}</b> {bulkN === 1 ? "aprobada" : "aprobadas"} por contabilizar en SAP.</>}</span>
             <span style={{ flex: 1 }} />
-            <ConfirmButton className="btn" action={postSelected}
-              confirmText="¿Contabilizar en SAP las facturas marcadas?">Contabilizar las marcadas</ConfirmButton>
-            <ConfirmButton className="btn pri" action={postAllFiltered}
-              confirmText={`¿Contabilizar en SAP las ${bulkN} facturas aprobadas de este filtro?`}>
-              Contabilizar las {fmtInt(bulkN)} aprobadas
-            </ConfirmButton>
+            <RejectButton className="btn bad" action={rejectSelected}>Rechazar las marcadas</RejectButton>
+            {bulkN > 0 && (
+              <>
+                <ConfirmButton className="btn" action={postSelected}
+                  confirmText="¿Contabilizar en SAP las facturas aprobadas que has marcado?">Contabilizar las marcadas</ConfirmButton>
+                <ConfirmButton className="btn pri" action={postAllFiltered}
+                  confirmText={`¿Contabilizar en SAP las ${bulkN} facturas aprobadas de este filtro?`}>
+                  Contabilizar las {fmtInt(bulkN)} aprobadas
+                </ConfirmButton>
+              </>
+            )}
           </form>
         )}
 
         <table className="tbl">
           <thead>
             <tr>
-              <th className="chk">{bulkN > 0 && <SelectAll />}</th>
+              <th className="chk">{markN > 0 && <SelectAll />}</th>
               <th>Nº factura</th><th>Proveedor</th><th className="r">Importe</th><th>Circuito</th><th>Estado</th><th>Canal</th><th>Recibida</th><th>Fecha factura</th>
             </tr>
           </thead>
@@ -219,7 +228,7 @@ export default async function Monitor({
                 <Fragment key={r.id as string}>
                   <tr id={open ? "sel" : undefined} className={`rw ${open ? "sel" : ""}`}>
                     <td className="chk">
-                      {r.status === "aprobada" && <input type="checkbox" name="sel" value={r.id as string} form="bulk" aria-label={`Marcar ${r.invoice_number}`} />}
+                      {MARCABLES.includes(r.status as string) && <input type="checkbox" name="sel" value={r.id as string} form="bulk" aria-label={`Marcar ${r.invoice_number}`} />}
                     </td>
                     <td>
                       <Link className="rowlink"

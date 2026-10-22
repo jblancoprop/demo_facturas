@@ -31,3 +31,23 @@ export function ConfirmButton({
     </button>
   );
 }
+
+// Botón que pide el motivo antes de rechazar las marcadas (el motivo viaja en el campo oculto "reason" del formulario).
+export function RejectButton({ action, className, children }: { action: (fd: FormData) => Promise<void>; className?: string; children: ReactNode }) {
+  return (
+    <button
+      className={className}
+      formAction={action}
+      onClick={(e) => {
+        const form = e.currentTarget.form;
+        const marked = form ? document.querySelectorAll<HTMLInputElement>('input[name="sel"]:checked').length : 0;
+        if (!marked) { e.preventDefault(); window.alert("Marca primero las facturas que quieres rechazar."); return; }
+        const reason = window.prompt(`Motivo del rechazo (obligatorio) para ${marked} ${marked === 1 ? "factura" : "facturas"}:`)?.trim();
+        if (!reason) { e.preventDefault(); return; }
+        (form!.elements.namedItem("reason") as HTMLInputElement).value = reason;
+      }}
+    >
+      {children}
+    </button>
+  );
+}
