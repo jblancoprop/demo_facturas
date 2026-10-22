@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { parseNum as num, fmtNum } from "@/lib/num";
+import { parseNum as num, fmtNum, eur } from "@/lib/num";
 
 type Line = {
   id: number;
@@ -12,8 +12,6 @@ type Line = {
   issue: string | null;
 };
 
-// Local a propósito: lib/db importa el driver de Neon y no puede ir al navegador.
-const eur = (n: number) => new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(n || 0);
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 type Adjustment = { concepto: string; importe: number };

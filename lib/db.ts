@@ -2,15 +2,16 @@ import { neon } from "@neondatabase/serverless";
 
 export const sql = neon(process.env.DATABASE_URL!);
 
+// Los valores internos (claves) no cambian: n8n, el Excel y el webhook dependen de ellos. Solo cambia el texto que ve la gente.
 export const STATUS = {
-  pendiente: "Pendiente",
+  pendiente: "Revisión manual",
   pendiente_aprobacion: "Pendiente aprobación",
   aprobada: "Aprobada",
   rechazada: "Rechazada",
   contabilizada: "Contabilizada",
 } as const;
 export type Status = keyof typeof STATUS;
-export const ORDER = ["pendiente", "pendiente_aprobacion", "aprobada", "rechazada", "contabilizada"] as const;
+export const ORDER = ["pendiente", "pendiente_aprobacion", "aprobada", "contabilizada", "rechazada"] as const;
 export const COLOR: Record<string, string> = {
   pendiente: "#f0c94a",
   pendiente_aprobacion: "#5aa7e6",
@@ -19,8 +20,7 @@ export const COLOR: Record<string, string> = {
   contabilizada: "#8e9aaa",
 };
 
-export const eur = (n: unknown) =>
-  new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" }).format(Number(n) || 0);
+export { eur } from "./num";
 
 export const qs = (o: Record<string, string | undefined | null>) => {
   const p = new URLSearchParams();
