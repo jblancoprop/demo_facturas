@@ -21,6 +21,14 @@ export function parseNum(x: unknown): number {
   return Number.isFinite(v) ? v : 0;
 }
 
-// Formato español para mostrar importes, precios y cantidades: coma decimal y punto de miles.
-export const fmtNum = (n: number, min = 0, max = 4) =>
-  new Intl.NumberFormat("es-ES", { minimumFractionDigits: min, maximumFractionDigits: max }).format(Number(n) || 0);
+// Formato único de toda la web: coma decimal y punto de miles SIEMPRE.
+// (El es-ES por defecto no agrupa los números de 4 cifras: 1208,00 frente a 12.500,00.)
+export const fmtNum = (n: unknown, min = 0, max = 4) =>
+  new Intl.NumberFormat("es-ES", { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: "always" }).format(
+    Number(n) || 0
+  );
+
+export const eur = (n: unknown) =>
+  new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", useGrouping: "always" }).format(Number(n) || 0);
+
+export const fmtInt = (n: unknown) => fmtNum(n, 0, 0);

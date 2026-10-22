@@ -49,6 +49,8 @@ input.bad{border-color:var(--red);background:var(--red-bg)}
 .chart .b em{font-style:normal;font-size:12px}
 .sup{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
 .sup:last-child{border:0}
+a.sup:hover span{color:var(--cy)}
+.sup small{font-size:12px}
 .tbl{width:100%;border-collapse:collapse}
 .tbl th{text-align:left;color:var(--mut);font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel2);position:sticky;top:0}
 .tbl td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -116,3 +118,18 @@ h4.sec{margin:20px 0 8px;font-size:13px;color:var(--mut);font-weight:600}
 .tbl tr.rw.sel td{border-bottom-color:var(--cy)}
 tr#sel{scroll-margin-top:12px}
 .pager-bar{display:flex;gap:14px;align-items:center;justify-content:flex-end;margin-top:14px;color:var(--mut)}
+#facturas{scroll-margin-top:12px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border:1px solid var(--line);border-radius:999px;color:var(--mut);font-size:13px;white-space:nowrap}
+.chip:hover{border-color:var(--cy);color:var(--ink)}
+.chip.on{background:#17343a;border-color:var(--cy);color:var(--cy)}
+.chip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.chip b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px;margin-bottom:14px;padding:12px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.filters label{font-size:12px}
+.filters input,.filters select{background:var(--bg)}
+.factions{grid-column:1/-1;display:flex;gap:8px;align-items:center}
+.bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:#12382c;border:1px solid var(--grn);border-radius:8px}
+.tbl th.chk,.tbl td.chk{width:34px;padding-right:0}
+.tbl input[type=checkbox]{width:auto;accent-color:var(--cy)}
+@media (max-width:1000px){.filters{grid-template-columns:1fr 1fr}}

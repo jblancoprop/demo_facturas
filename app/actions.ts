@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
 import { syncExcel } from "@/lib/sync";
 import { parseNum } from "@/lib/num";
+import { listInvoices, parseFilters, type RawFilters } from "@/lib/filters";
 
 const EXCEL_ESTADO: Record<string, string> = {
   pendiente: "Revisión manual",
@@ -20,6 +21,11 @@ const log = (id: string, event: string, detail?: string | null) =>
 
 async function finish(id: string) {
   revalidatePath("/", "layout");
+  await syncOne(id);
+}
+
+// Avisa a n8n del estado actual de una factura para que actualice el Excel.
+async function syncOne(id: string) {
   const [r] = await sql`select i.*,
     (select count(*)::int from approvals a where a.invoice_id = i.id) as lv,
     (select count(*)::int from approvals a where a.invoice_id = i.id and a.decision = 'approved') as ok
@@ -140,13 +146,43 @@ export async function reopenInvoice(fd: FormData) {
   await finish(id);
 }
 
-export async function postInvoice(fd: FormData) {
-  const id = txt(fd.get("id"));
+// Contabiliza una factura aprobada (simulado). Devuelve false si no estaba en estado "aprobada".
+async function postOne(id: string): Promise<boolean> {
   const [r] = await sql`select posting_type from invoices where id = ${id}`;
   const kind = r?.posting_type === "logistico" ? "logístico (MIRO)" : "financiero (FB60)";
   const doc = "5105" + String(Math.floor(Math.random() * 1e6)).padStart(6, "0");
-  await sql`update invoices set status = 'contabilizada', sap_doc = ${doc}, updated_at = now()
-            where id = ${id} and status = 'aprobada'`;
+  const done = await sql`update invoices set status = 'contabilizada', sap_doc = ${doc}, updated_at = now()
+            where id = ${id} and status = 'aprobada' returning id`;
+  if (!done.length) return false;
   await log(id, "contabilizada", `Posting SAP ${kind} · doc ${doc} (simulado)`);
+  return true;
+}
+
+export async function postInvoice(fd: FormData) {
+  const id = txt(fd.get("id"));
+  await postOne(id);
   await finish(id);
+}
+
+async function postMany(ids: string[]) {
+  const posted: string[] = [];
+  for (const id of ids) if (await postOne(id)) posted.push(id);
+  revalidatePath("/", "layout");
+  await Promise.all(posted.map(syncOne));
+}
+
+// Contabiliza las facturas marcadas con la casilla de la tabla.
+export async function postSelected(fd: FormData) {
+  await postMany(fd.getAll("sel").map(String));
+}
+
+// Contabiliza todas las aprobadas que cumplen los filtros actuales (también las de otras páginas).
+export async function postAllFiltered(fd: FormData) {
+  const raw: RawFilters = {};
+  for (const k of ["estado", "ci", "q", "prov", "canal", "desde", "hasta", "min", "max"] as const) {
+    const v = fd.get(`f_${k}`);
+    if (typeof v === "string" && v) raw[k] = v;
+  }
+  const rows = await listInvoices(parseFilters(raw));
+  await postMany(rows.filter((r) => r.status === "aprobada").map((r) => r.id as string));
 }
