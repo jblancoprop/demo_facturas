@@ -36,16 +36,19 @@ export default async function Monitor({
   // Facturas recibidas en el periodo elegido (por día, semana o mes), separadas por lo que han acabado siendo.
   const vista = parseVista(sp.vista);
   const per = VISTAS[vista];
-  const bars = await sql`select to_char(g, 'YYYY-MM-DD') as d,
+  const bars = await sql`with p as (
+      select date_trunc(${per.trunc}::text, now() at time zone 'Europe/Madrid') + ${per.shift}::interval as ini)
+    select to_char(g, 'YYYY-MM-DD') as d,
+      g > now() at time zone 'Europe/Madrid' as fut,
       count(i.id)::int as c,
       count(*) filter (where i.status = 'pendiente')::int as inc,
       count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
       count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
       count(*) filter (where i.status = 'rechazada')::int as rej
-    from generate_series(
-      case when ${per.back}::text is null then date_trunc('year', now() at time zone 'Europe/Madrid')
-           else date_trunc(${per.unit}::text, now() at time zone 'Europe/Madrid') - ${per.back}::interval end,
-      date_trunc(${per.unit}::text, now() at time zone 'Europe/Madrid'),
+    from p, generate_series(
+      p.ini,
+      case when ${per.span}::text is null then date_trunc('month', now() at time zone 'Europe/Madrid')
+           else p.ini + ${per.span}::interval end,
       ${per.step}::interval) g
     left join invoices i on date_trunc(${per.unit}::text, i.received_at at time zone 'Europe/Madrid') = g
     group by g order by g`;
@@ -67,6 +70,12 @@ export default async function Monitor({
 
   const maxD = Math.max(1, ...bars.map((x) => x.c as number));
   const sumBars = bars.reduce((a, x) => a + (x.c as number), 0);
+  const fmtD = (d: string, o: Intl.DateTimeFormatOptions) => new Date(`${d}T12:00:00`).toLocaleDateString("es-ES", o).replace(".", "");
+  const firstD = bars[0]?.d as string;
+  const lastD = bars[bars.length - 1]?.d as string;
+  const rango = !firstD ? "" : per.unit === "month"
+    ? `${fmtD(firstD, { month: "short" })} – ${fmtD(lastD, { month: "short", year: "numeric" })}`
+    : `${fmtD(firstD, { weekday: "short", day: "2-digit", month: "2-digit" })} – ${fmtD(lastD, { weekday: "short", day: "2-digit", month: "2-digit" })}`;
   const pg = (n: number) => (n > 1 ? String(n) : undefined);
   const tableKeep = { ...keep, vista: undefined }; // el periodo del gráfico no filtra la tabla
   const hasFilter = Object.values(tableKeep).some(Boolean);
@@ -76,7 +85,6 @@ export default async function Monitor({
     if (per.unit === "month")
       return { top: dt.toLocaleDateString("es-ES", { month: "short" }).replace(".", ""), sub: dt.toLocaleDateString("es-ES", { year: "2-digit" }),
         when: dt.toLocaleDateString("es-ES", { month: "long", year: "numeric" }) };
-    if (per.unit === "week") return { top: dm, sub: "sem.", when: `Semana del ${dm}` };
     const wd = dt.toLocaleDateString("es-ES", { weekday: "short" }).replace(".", "").slice(0, 2);
     return { top: dt.toLocaleDateString("es-ES", { day: "2-digit" }), sub: wd, when: `${dt.toLocaleDateString("es-ES", { weekday: "long" })} ${dm}` };
   };
@@ -107,7 +115,7 @@ export default async function Monitor({
         <div className="panel">
           <div className="phead">
             <h3>Facturas recibidas · {per.title}
-              <small className="c-mut"> · {fmtInt(sumBars)} en este periodo, {fmtInt(k.n)} en total</small></h3>
+              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo, {fmtInt(k.n)} en total</small></h3>
             <div className="seg">
               {(Object.keys(VISTAS) as Vista[]).map((v) => (
                 <Link key={v} className={v === vista ? "on" : ""}
@@ -128,10 +136,10 @@ export default async function Monitor({
                 [x.inc, COLOR.pendiente, "incidencia"], [x.apr, COLOR.pendiente_aprobacion, "en aprobación"],
                 [x.ok, COLOR.aprobada, "aprobada"], [x.rej, COLOR.rechazada, "rechazada"],
               ] as [number, string, string][];
-              const tip = `${lab.when}: ${x.c} recibidas` +
+              const tip = `${lab.when}${x.fut ? " (todavía no ha llegado)" : ""}: ${x.c} recibidas` +
                 parts.filter(([n]) => n).map(([n, , t]) => ` · ${n} ${t}`).join("");
               return (
-                <div className="b" key={x.d as string} title={tip}>
+                <div className={`b ${x.fut ? "fut" : ""}`} key={x.d as string} title={tip}>
                   <em>{x.c ? fmtInt(x.c) : ""}</em>
                   <div className="stack" style={{ height: `${((x.c as number) / maxD) * 100}%` }}>
                     {parts.filter(([n]) => n > 0).map(([n, c, t]) => <i key={t} style={{ flex: n, background: c }} />)}

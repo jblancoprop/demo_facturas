@@ -1,10 +1,13 @@
-// Periodos del gráfico de facturas recibidas. "back" es cuánto se retrocede desde el final del periodo en curso;
-// null = desde el 1 de enero (año en curso).
+// Periodos del gráfico de facturas recibidas: siempre periodos de calendario (zona Europe/Madrid).
+//  - Semanas: de lunes a domingo.  - Meses: del día 1 al último día.  - Año en curso: de enero al mes actual.
+// Cada periodo se define así: empieza en date_trunc(trunc, ahora) + shift y termina en el inicio + span
+// (o, si span es null, en el mes actual). unit/step marcan el tamaño de cada barra.
 export const VISTAS = {
-  semana: { label: "Última semana", title: "últimos 7 días", unit: "day", step: "1 day", back: "6 days" },
-  mes: { label: "Último mes", title: "últimos 30 días", unit: "day", step: "1 day", back: "29 days" },
-  trimestre: { label: "Últimos 3 meses", title: "últimos 3 meses, por semanas", unit: "week", step: "1 week", back: "12 weeks" },
-  ytd: { label: "Año en curso", title: "en lo que va de año, por meses", unit: "month", step: "1 month", back: null },
+  semana: { label: "Esta semana", title: "esta semana", trunc: "week", shift: "0 days", span: "6 days", unit: "day", step: "1 day" },
+  semana_pasada: { label: "Semana pasada", title: "la semana pasada", trunc: "week", shift: "-7 days", span: "6 days", unit: "day", step: "1 day" },
+  mes: { label: "Este mes", title: "este mes", trunc: "month", shift: "0 days", span: "1 month -1 day", unit: "day", step: "1 day" },
+  mes_pasado: { label: "Mes pasado", title: "el mes pasado", trunc: "month", shift: "-1 month", span: "1 month -1 day", unit: "day", step: "1 day" },
+  ytd: { label: "Año en curso", title: "el año en curso, por meses", trunc: "year", shift: "0 days", span: null, unit: "month", step: "1 month" },
 } as const;
 
 export type Vista = keyof typeof VISTAS;
