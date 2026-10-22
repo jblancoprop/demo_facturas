@@ -8,6 +8,7 @@ import { postAllFiltered, postSelected } from "./actions";
 import { ConfirmButton, SelectAll } from "@/components/BulkControls";
 import Detail, { Badge } from "@/components/Detail";
 import FilterForm from "@/components/FilterForm";
+import ReceivedChart, { type Bar } from "@/components/ReceivedChart";
 import { VISTAS, VISTA_DEFECTO, parseVista, type Vista } from "@/lib/periods";
 
 export const dynamic = "force-dynamic";
@@ -68,8 +69,8 @@ export default async function Monitor({
   const detail = id && rows.some((r) => r.id === id) ? await getDetail(id) : null;
   const bulkN = inScope.includes("aprobada") ? cnt.aprobada ?? 0 : 0;
 
-  const maxD = Math.max(1, ...bars.map((x) => x.c as number));
   const sumBars = bars.reduce((a, x) => a + (x.c as number), 0);
+  const peak = bars.reduce((m, x) => ((x.c as number) > (m.c as number) ? x : m), bars[0]);
   const fmtD = (d: string, o: Intl.DateTimeFormatOptions) => new Date(`${d}T12:00:00`).toLocaleDateString("es-ES", o).replace(".", "");
   const firstD = bars[0]?.d as string;
   const lastD = bars[bars.length - 1]?.d as string;
@@ -79,15 +80,6 @@ export default async function Monitor({
   const pg = (n: number) => (n > 1 ? String(n) : undefined);
   const tableKeep = { ...keep, vista: undefined }; // el periodo del gráfico no filtra la tabla
   const hasFilter = Object.values(tableKeep).some(Boolean);
-  const barLabel = (d: string) => {
-    const dt = new Date(`${d}T12:00:00`);
-    const dm = dt.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
-    if (per.unit === "month")
-      return { top: dt.toLocaleDateString("es-ES", { month: "short" }).replace(".", ""), sub: dt.toLocaleDateString("es-ES", { year: "2-digit" }),
-        when: dt.toLocaleDateString("es-ES", { month: "long", year: "numeric" }) };
-    const wd = dt.toLocaleDateString("es-ES", { weekday: "short" }).replace(".", "").slice(0, 2);
-    return { top: dt.toLocaleDateString("es-ES", { day: "2-digit" }), sub: wd, when: `${dt.toLocaleDateString("es-ES", { weekday: "long" })} ${dm}` };
-  };
   const kpi = (estado: string, label: string, n: unknown, amount: unknown, sub: string, cls: string) => (
     <Link className="panel kpi link" href={`/${qs({ ...keep, estado, p: undefined, id: undefined })}#facturas`}>
       <div className="k">{label}</div>
@@ -115,7 +107,7 @@ export default async function Monitor({
         <div className="panel">
           <div className="phead">
             <h3>Facturas recibidas · {per.title}
-              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo, {fmtInt(k.n)} en total</small></h3>
+              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo{sumBars > 0 && peak ? `, pico de ${fmtInt(peak.c)}` : ""} · {fmtInt(k.n)} en total</small></h3>
             <div className="seg">
               {(Object.keys(VISTAS) as Vista[]).map((v) => (
                 <Link key={v} className={v === vista ? "on" : ""}
@@ -123,32 +115,7 @@ export default async function Monitor({
               ))}
             </div>
           </div>
-          <div className="legend">
-            <span><i style={{ background: COLOR.pendiente }} />Incidencia</span>
-            <span><i style={{ background: COLOR.pendiente_aprobacion }} />En aprobación</span>
-            <span><i style={{ background: COLOR.aprobada }} />Aprobada o contabilizada</span>
-            <span><i style={{ background: COLOR.rechazada }} />Rechazada</span>
-          </div>
-          <div className="chart">
-            {bars.map((x) => {
-              const lab = barLabel(x.d as string);
-              const parts = [
-                [x.inc, COLOR.pendiente, "incidencia"], [x.apr, COLOR.pendiente_aprobacion, "en aprobación"],
-                [x.ok, COLOR.aprobada, "aprobada"], [x.rej, COLOR.rechazada, "rechazada"],
-              ] as [number, string, string][];
-              const tip = `${lab.when}${x.fut ? " (todavía no ha llegado)" : ""}: ${x.c} recibidas` +
-                parts.filter(([n]) => n).map(([n, , t]) => ` · ${n} ${t}`).join("");
-              return (
-                <div className={`b ${x.fut ? "fut" : ""}`} key={x.d as string} title={tip}>
-                  <em>{x.c ? fmtInt(x.c) : ""}</em>
-                  <div className="stack" style={{ height: `${((x.c as number) / maxD) * 100}%` }}>
-                    {parts.filter(([n]) => n > 0).map(([n, c, t]) => <i key={t} style={{ flex: n, background: c }} />)}
-                  </div>
-                  <span>{lab.top}<br /><small>{lab.sub}</small></span>
-                </div>
-              );
-            })}
-          </div>
+          <ReceivedChart bars={bars as Bar[]} unit={per.unit} />
         </div>
         <div className="panel">
           <h3>Top proveedores · importe aprobado</h3>
