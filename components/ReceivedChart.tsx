@@ -1,11 +1,15 @@
+import Link from "next/link";
 import { COLOR } from "@/lib/db";
 import { fmtInt } from "@/lib/num";
 
-export type Bar = { d: string; fut: boolean; c: number; inc: number; apr: number; ok: number; rej: number };
+import type { Bar } from "@/lib/overview";
 
 // Facturas recibidas por día o por mes, apiladas por lo que han acabado siendo.
-// Día futuro = todavía no hay datos: queda en blanco. Día pasado sin facturas = un cero real: línea fina en la base.
-export default function ReceivedChart({ bars, unit }: { bars: Bar[]; unit: "day" | "month" }) {
+// El eje termina hoy (no hay datos futuros). Día pasado sin facturas = un cero real: línea fina en la base.
+// Cada barra es un enlace: href(d) devuelve la URL que filtra todo por ese día (o mes); selected(d) dice si ya está elegida.
+export default function ReceivedChart({
+  bars, unit, href, active, selected,
+}: { bars: Bar[]; unit: "day" | "month"; href: (d: string) => string; active: boolean; selected: (d: string) => boolean }) {
   const dense = bars.length > 14; // con tantas barras se acortan las etiquetas y el hueco entre ellas
   const maxD = Math.max(1, ...bars.map((x) => x.c));
   const label = (d: string) => {
@@ -33,19 +37,15 @@ export default function ReceivedChart({ bars, unit }: { bars: Bar[]; unit: "day"
         <div className={`chart ${dense ? "dense" : ""}`}>
           {bars.map((x) => {
             const lab = label(x.d);
-            if (x.fut)
-              return (
-                <div className="b fut" key={x.d} title={`${lab.when}: todavía no ha llegado`}>
-                  <em /><div className="stack" /><span>&nbsp;<br /><small>&nbsp;</small></span>
-                </div>
-              );
             const parts: [number, string, string][] = [
               [x.inc, COLOR.pendiente, "incidencia"], [x.apr, COLOR.pendiente_aprobacion, "en aprobación"],
               [x.ok, COLOR.aprobada, "aprobada"], [x.rej, COLOR.rechazada, "rechazada"],
             ];
-            const tip = `${lab.when}: ${x.c} recibidas` + parts.filter(([n]) => n).map(([n, , t]) => ` · ${n} ${t}`).join("");
+            const sel = selected(x.d);
+            const tip = `${lab.when}: ${x.c} ${x.c === 1 ? "recibida" : "recibidas"}` + parts.filter(([n]) => n).map(([n, , t]) => ` · ${n} ${t}`).join("") +
+              (sel ? " — pulsa para quitar el filtro" : " — pulsa para filtrar");
             return (
-              <div className={`b ${lab.weekend ? "we" : ""}`} key={x.d} title={tip}>
+              <Link href={href(x.d)} className={`b ${lab.weekend ? "we" : ""} ${active && !sel ? "dim" : ""} ${sel ? "sel" : ""}`} key={x.d} title={tip} scroll={false}>
                 <em>{x.c ? fmtInt(x.c) : ""}</em>
                 {x.c ? (
                   <div className="stack" style={{ height: `${(x.c / maxD) * 100}%` }}>
@@ -53,7 +53,7 @@ export default function ReceivedChart({ bars, unit }: { bars: Bar[]; unit: "day"
                   </div>
                 ) : <div className="zero" />}
                 <span>{lab.top}<br /><small>{lab.sub}</small></span>
-              </div>
+              </Link>
             );
           })}
         </div>

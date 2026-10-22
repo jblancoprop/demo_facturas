@@ -10,11 +10,12 @@ export async function GET(req: Request) {
     if (v) raw[k] = v;
   }
   const rows = await listInvoices(parseFilters(raw));
-  const head = ["N_factura", "Proveedor", "NIF", "Fecha", "Base", "IVA", "Total", "Circuito", "Estado", "Canal", "PO", "Doc_SAP", "Motivo_rechazo"];
+  const head = ["N_factura", "Proveedor", "NIF", "Fecha_factura", "Recibida", "Base", "IVA", "Total", "Circuito", "Estado", "Canal", "PO", "Doc_SAP", "Motivo_rechazo"];
   const money = (v: unknown) => String(parseNum(v)).replace(".", ","); // coma decimal, sin separador de miles
+  const recibida = (d: unknown) => (d ? new Date(d as string).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" }) : "");
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const line = (r: Record<string, unknown>) =>
-    [r.invoice_number, r.supplier_name, r.supplier_nif, r.invoice_date, money(r.base), money(r.vat), money(r.total),
+    [r.invoice_number, r.supplier_name, r.supplier_nif, r.invoice_date, recibida(r.received_at), money(r.base), money(r.vat), money(r.total),
       r.posting_type, r.status, r.manual ? "Manual" : "Auto", r.po_number, r.sap_doc, r.rejection_reason].map(esc).join(";");
   const csv = "﻿" + [head.join(";"), ...rows.map(line)].join("\r\n");
   return new Response(csv, {

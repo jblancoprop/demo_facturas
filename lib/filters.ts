@@ -1,13 +1,14 @@
 import { sql, STATUS } from "./db";
 import { VISTA_DEFECTO, parseVista } from "./periods";
 
-// Filtros del listado de facturas. Los usan el Monitor, la exportación a CSV y la contabilización masiva,
-// así que "lo que ves filtrado" es siempre "lo que se exporta" y "lo que se contabiliza".
+// Filtros de la pantalla. Los usan el Monitor entero (KPIs, gráfico, top de proveedores, chips y tabla),
+// la exportación a CSV y la contabilización masiva: lo que ves filtrado es lo que se exporta y se contabiliza.
+// La única fecha es la de RECEPCIÓN del correo (zona Europe/Madrid), la misma que usa el gráfico.
 
 export type RawFilters = {
   estado?: string; ci?: string; q?: string; prov?: string; canal?: string;
   desde?: string; hasta?: string; min?: string; max?: string;
-  vista?: string; // periodo del gráfico de recibidas; no filtra la tabla
+  vista?: string; // periodo del gráfico de recibidas; no filtra nada
 };
 
 export type Filters = {
@@ -16,8 +17,8 @@ export type Filters = {
   canal: "auto" | "manual" | null;
   prov: string | null;
   term: string | null; // texto a buscar en nº de factura o proveedor
-  desde: string | null; // YYYYMMDD
-  hasta: string | null; // YYYYMMDD
+  desde: string | null; // AAAAMMDD, fecha de recepción
+  hasta: string | null; // AAAAMMDD, fecha de recepción
   min: number | null;
   max: number | null;
 };
@@ -65,9 +66,7 @@ export function keepParams(raw: RawFilters): Record<string, string | undefined> 
   };
 }
 
-// La fecha de factura se guarda como texto DD/MM/YYYY. Se compara como AAAAMMDD para no fallar con fechas raras.
-// (Los where de abajo son iguales en las tres consultas, salvo el estado en byStatus.)
-
+// Tabla: aplica todos los filtros y pagina.
 export async function listInvoices(f: Filters, opts: { limit?: number; offset?: number } = {}) {
   return sql`select id, supplier_name, supplier_nif, invoice_number, invoice_date, base, vat, total,
       posting_type, status, po_number, sap_doc, rejection_reason, manual, received_at
@@ -79,27 +78,25 @@ export async function listInvoices(f: Filters, opts: { limit?: number; offset?: 
       and (${f.term}::text is null or supplier_name ilike ${f.term} or invoice_number ilike ${f.term})
       and (${f.min}::numeric is null or total >= ${f.min})
       and (${f.max}::numeric is null or total <= ${f.max})
-      and (${f.desde}::text is null or (case when invoice_date ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
-            then substr(invoice_date, 7, 4) || substr(invoice_date, 4, 2) || substr(invoice_date, 1, 2) end) >= ${f.desde})
-      and (${f.hasta}::text is null or (case when invoice_date ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
-            then substr(invoice_date, 7, 4) || substr(invoice_date, 4, 2) || substr(invoice_date, 1, 2) end) <= ${f.hasta})
+      and (${f.desde}::text is null or to_char(received_at at time zone 'Europe/Madrid', 'YYYYMMDD') >= ${f.desde})
+      and (${f.hasta}::text is null or to_char(received_at at time zone 'Europe/Madrid', 'YYYYMMDD') <= ${f.hasta})
     order by received_at desc
     limit ${opts.limit ?? null} offset ${opts.offset ?? 0}`;
 }
 
-// Cuántas facturas hay por estado con el resto de filtros aplicados (alimenta los chips de estado).
-export async function countByStatus(f: Filters) {
-  const rows = await sql`select status, count(*)::int as c from invoices
+export type BaseRow = { status: string; total: number | string; supplier_name: string | null; d: string };
+
+// Base de los KPIs, el gráfico, el top de proveedores y los chips: todas las facturas que cumplen los filtros
+// EXCEPTO el estado y las fechas (cada uno de esos elementos aplica el suyo: el gráfico agrupa por fecha y
+// los KPIs por estado). Se resumen en memoria, así un filtro afecta siempre a todo por igual.
+export async function baseRows(f: Filters): Promise<BaseRow[]> {
+  return (await sql`select status, total, supplier_name,
+      to_char(received_at at time zone 'Europe/Madrid', 'YYYY-MM-DD') as d
+    from invoices
     where (${f.ci}::text is null or posting_type = ${f.ci})
       and (${f.canal}::text is null or manual = (${f.canal}::text = 'manual'))
       and (${f.prov}::text is null or supplier_name = ${f.prov})
       and (${f.term}::text is null or supplier_name ilike ${f.term} or invoice_number ilike ${f.term})
       and (${f.min}::numeric is null or total >= ${f.min})
-      and (${f.max}::numeric is null or total <= ${f.max})
-      and (${f.desde}::text is null or (case when invoice_date ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
-            then substr(invoice_date, 7, 4) || substr(invoice_date, 4, 2) || substr(invoice_date, 1, 2) end) >= ${f.desde})
-      and (${f.hasta}::text is null or (case when invoice_date ~ '^[0-9]{2}/[0-9]{2}/[0-9]{4}$'
-            then substr(invoice_date, 7, 4) || substr(invoice_date, 4, 2) || substr(invoice_date, 1, 2) end) <= ${f.hasta})
-    group by status`;
-  return Object.fromEntries(rows.map((r) => [r.status as string, r.c as number])) as Record<string, number>;
+      and (${f.max}::numeric is null or total <= ${f.max})`) as BaseRow[];
 }

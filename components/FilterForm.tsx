@@ -7,7 +7,7 @@ export default function FilterForm({ children }: { children: ReactNode }) {
   return (
     <form
       className="filters"
-      action="/#facturas"
+      action="/"
       onChange={(e) => {
         const t = e.target as unknown as HTMLInputElement | HTMLSelectElement;
         if (t.tagName === "SELECT" || (t as HTMLInputElement).type === "date") e.currentTarget.requestSubmit();
