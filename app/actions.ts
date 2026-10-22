@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { sql } from "@/lib/db";
 import { syncExcel } from "@/lib/sync";
 import { parseNum } from "@/lib/num";
+import { missingFields } from "@/lib/required";
 import { listInvoices, parseFilters, type RawFilters } from "@/lib/filters";
 
 const EXCEL_ESTADO: Record<string, string> = {
@@ -51,6 +52,8 @@ async function persist(fd: FormData) {
   const id = txt(fd.get("id"));
   const lineIds = fd.getAll("line_id").map(String);
   const po = txt(fd.get("po_number"));
+  const tm = txt(fd.get("total_manual")); // solo aparece cuando la factura no tiene líneas
+  const totalManual = tm ? num(tm) : null;
   const stmts: any[] = [];
   let base = 0;
   let vat = 0;
@@ -81,7 +84,8 @@ async function persist(fd: FormData) {
     posting_type = case when ${po}::text <> '' then 'logistico' else 'financiero' end,
     base = case when ${lineIds.length}::int > 0 then ${base}::numeric else base end,
     vat = case when ${lineIds.length}::int > 0 then ${vat}::numeric else vat end,
-    total = case when ${lineIds.length}::int > 0 then ${Math.round((base + vat + adj) * 100) / 100}::numeric else total end,
+    total = case when ${lineIds.length}::int > 0 then ${Math.round((base + vat + adj) * 100) / 100}::numeric
+                  when ${totalManual}::numeric is not null then ${totalManual}::numeric else total end,
     updated_at = now()
     where id = ${id}`);
   stmts.push(log(id, "editada", "Cabecera y líneas actualizadas"));
@@ -96,11 +100,12 @@ export async function saveInvoice(fd: FormData) {
 
 export async function validateInvoice(fd: FormData) {
   const id = await persist(fd);
-  const [inv] = await sql`select supplier_name, supplier_nif, total from invoices where id = ${id}`;
+  const [inv] = await sql`select supplier_name, supplier_nif, invoice_number, invoice_date, total from invoices where id = ${id}`;
   const [{ miss }] = await sql`select count(*)::int as miss from invoice_lines
     where invoice_id = ${id} and (internal_code is null or internal_code = '')`;
-  if (!inv?.supplier_name || !inv?.supplier_nif || miss > 0) {
-    await log(id, "validación fallida", "Faltan proveedor, NIF o códigos de producto");
+  const missing = missingFields(inv ?? {});
+  if (missing.length || miss > 0) {
+    await log(id, "validación fallida", [missing.length ? `Faltan datos obligatorios: ${missing.join(", ")}` : "", miss > 0 ? "Faltan códigos de producto" : ""].filter(Boolean).join(". "));
     await finish(id);
     return;
   }
@@ -113,6 +118,13 @@ export async function validateInvoice(fd: FormData) {
 export async function approveInvoice(fd: FormData) {
   const id = txt(fd.get("id"));
   const comment = txt(fd.get("comment"));
+  const [inv] = await sql`select supplier_name, supplier_nif, invoice_number, invoice_date, total from invoices where id = ${id}`;
+  const missing = missingFields(inv ?? {});
+  if (missing.length) {
+    await log(id, "aprobación bloqueada", `Faltan datos obligatorios: ${missing.join(", ")}`);
+    await finish(id);
+    return;
+  }
   const next = await sql`select id, level from approvals
     where invoice_id = ${id} and decision = 'pending' order by level limit 1`;
   if (next[0]) {

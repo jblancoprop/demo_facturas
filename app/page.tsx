@@ -11,6 +11,7 @@ import Detail, { Badge } from "@/components/Detail";
 import FilterForm from "@/components/FilterForm";
 import ReceivedChart from "@/components/ReceivedChart";
 import { VISTAS, VISTA_DEFECTO, parseVista, type Vista } from "@/lib/periods";
+import { missingFields } from "@/lib/required";
 
 export const dynamic = "force-dynamic";
 const PAGE = 25;
@@ -223,8 +224,10 @@ export default async function Monitor({
                     <td>
                       <Link className="rowlink"
                         href={open ? `/${qs({ ...keep, p: pg(p) })}#facturas` : `/${qs({ ...keep, p: pg(p), id: r.id as string })}#sel`}>
-                        {open ? "▾ " : "▸ "}{r.invoice_number}
+                        {open ? "▾ " : "▸ "}{r.invoice_number || "(sin número)"}
                       </Link>
+                      {(r.status === "pendiente" || r.status === "pendiente_aprobacion") && missingFields(r).length > 0 &&
+                        <span className="tag bad" style={{ marginLeft: 8 }} title={`Faltan: ${missingFields(r).join(", ")}`}>Incompleta</span>}
                     </td>
                     <td>{r.supplier_name || <span className="c-red">— sin proveedor —</span>}</td>
                     <td className="r num">{eur(r.total)}</td>
