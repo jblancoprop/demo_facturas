@@ -159,3 +159,10 @@ a.kpi.link:hover{border-color:var(--cy)}
 .chart .b.we span{color:#6a7686}
 .chart .b .zero{width:100%;height:2px;background:var(--line);border-radius:1px}
 .chart-empty{height:180px;display:flex;align-items:center;justify-content:center;color:var(--mut);border:1px dashed var(--line);border-radius:8px}
+.filterpanel{padding:12px 14px;margin-bottom:14px}
+.filterpanel .filters{margin:0;padding:0;background:none;border:0}
+.scope{color:var(--cy);font-size:13px;margin-left:6px}
+.chart a.b{cursor:pointer;border-radius:4px}
+.chart a.b:hover{background:#ffffff0d}
+.chart a.b.dim .stack,.chart a.b.dim em{opacity:.3}
+.chart a.b.sel{background:#6bd9df1f;box-shadow:inset 0 0 0 1px var(--cy)}

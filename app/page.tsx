@@ -3,17 +3,25 @@ import Link from "next/link";
 import { sql, STATUS, ORDER, COLOR, eur, qs } from "@/lib/db";
 import { fmtInt } from "@/lib/num";
 import { getDetail } from "@/lib/queries";
-import { APROBADAS, countByStatus, keepParams, listInvoices, parseFilters, type RawFilters } from "@/lib/filters";
+import { APROBADAS, baseRows, keepParams, listInvoices, parseFilters, type RawFilters } from "@/lib/filters";
+import { summarize, type Bucket } from "@/lib/overview";
 import { postAllFiltered, postSelected } from "./actions";
 import { ConfirmButton, SelectAll } from "@/components/BulkControls";
 import Detail, { Badge } from "@/components/Detail";
 import FilterForm from "@/components/FilterForm";
-import ReceivedChart, { type Bar } from "@/components/ReceivedChart";
+import ReceivedChart from "@/components/ReceivedChart";
 import { VISTAS, VISTA_DEFECTO, parseVista, type Vista } from "@/lib/periods";
 
 export const dynamic = "force-dynamic";
 const PAGE = 25;
-const COLS = 8;
+const COLS = 9;
+
+const fmtDate = (d: unknown) => (d ? new Date(d as string).toLocaleDateString("es-ES", { timeZone: "Europe/Madrid" }) : "");
+const fmtD = (d: string, o: Intl.DateTimeFormatOptions) => new Date(`${d}T12:00:00`).toLocaleDateString("es-ES", o).replace(".", "");
+const lastDayOfMonth = (d: string) => {
+  const [y, m] = d.split("-").map(Number);
+  return `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+};
 
 export default async function Monitor({
   searchParams,
@@ -22,68 +30,71 @@ export default async function Monitor({
   const { id, p: pRaw } = sp;
   const f = parseFilters(sp);
   const keep = keepParams(sp);
-
-  // Totales de toda la bandeja (no dependen de los filtros).
-  const [k] = await sql`select count(*)::int as n,
-    coalesce(sum(total) filter (where status = 'pendiente'), 0) as inc_amt,
-    count(*) filter (where status = 'pendiente')::int as inc_n,
-    coalesce(sum(total) filter (where status = 'pendiente_aprobacion'), 0) as pend_amt,
-    count(*) filter (where status = 'pendiente_aprobacion')::int as pend_n,
-    coalesce(sum(total) filter (where status in ('aprobada','contabilizada')), 0) as apr_amt,
-    count(*) filter (where status in ('aprobada','contabilizada'))::int as apr_n,
-    count(*) filter (where status = 'aprobada')::int as por_contabilizar,
-    coalesce(sum(total) filter (where status = 'contabilizada'), 0) as cont_amt,
-    count(*) filter (where status = 'contabilizada')::int as cont_n from invoices`;
-  // Facturas recibidas en el periodo elegido (por día, semana o mes), separadas por lo que han acabado siendo.
   const vista = parseVista(sp.vista);
   const per = VISTAS[vista];
-  const bars = await sql`with p as (
+
+  // Ejes del gráfico del periodo elegido (días o meses) y lista de proveedores para el desplegable.
+  const buckets = (await sql`with p as (
       select date_trunc(${per.trunc}::text, now() at time zone 'Europe/Madrid') + ${per.shift}::interval as ini)
-    select to_char(g, 'YYYY-MM-DD') as d,
-      g > now() at time zone 'Europe/Madrid' as fut,
-      count(i.id)::int as c,
-      count(*) filter (where i.status = 'pendiente')::int as inc,
-      count(*) filter (where i.status = 'pendiente_aprobacion')::int as apr,
-      count(*) filter (where i.status in ('aprobada','contabilizada'))::int as ok,
-      count(*) filter (where i.status = 'rechazada')::int as rej
+    select to_char(g, 'YYYY-MM-DD') as d, g > now() at time zone 'Europe/Madrid' as fut
     from p, generate_series(
       p.ini,
       case when ${per.span}::text is null then date_trunc('month', now() at time zone 'Europe/Madrid')
            else p.ini + ${per.span}::interval end,
       ${per.step}::interval) g
-    left join invoices i on date_trunc(${per.unit}::text, i.received_at at time zone 'Europe/Madrid') = g
-    group by g order by g`;
-  const top = await sql`select supplier_name as s, sum(total) as t, count(*)::int as n from invoices
-    where status in ('aprobada','contabilizada') and coalesce(supplier_name, '') <> ''
-    group by 1 order by t desc limit 5`;
+    order by g`) as Bucket[];
   const provs = await sql`select distinct supplier_name as s from invoices where coalesce(supplier_name, '') <> '' order by 1 limit 500`;
 
-  // Listado con filtros.
-  const cnt = await countByStatus(f);
+  // KPIs, chips, gráfico y top salen de las mismas filas filtradas; la tabla aplica además el estado y se pagina.
+  const sum = summarize(await baseRows(f), f, buckets, per.unit);
+  const cnt: Record<string, number> = Object.fromEntries(Object.entries(sum.byStatus).map(([s, v]) => [s, v.n]));
   const inScope = f.statuses ? f.statuses.split(",") : [...ORDER];
   const totalRows = inScope.reduce((a, s) => a + (cnt[s] ?? 0), 0);
-  const allRows = ORDER.reduce((a, s) => a + (cnt[s] ?? 0), 0);
   const pages = Math.max(1, Math.ceil(totalRows / PAGE));
   const p = Math.min(Math.max(1, parseInt(pRaw ?? "1") || 1), pages);
   const rows = await listInvoices(f, { limit: PAGE, offset: (p - 1) * PAGE });
   const detail = id && rows.some((r) => r.id === id) ? await getDetail(id) : null;
   const bulkN = inScope.includes("aprobada") ? cnt.aprobada ?? 0 : 0;
 
-  const sumBars = bars.reduce((a, x) => a + (x.c as number), 0);
-  const peak = bars.reduce((m, x) => ((x.c as number) > (m.c as number) ? x : m), bars[0]);
-  const fmtD = (d: string, o: Intl.DateTimeFormatOptions) => new Date(`${d}T12:00:00`).toLocaleDateString("es-ES", o).replace(".", "");
-  const firstD = bars[0]?.d as string;
-  const lastD = bars[bars.length - 1]?.d as string;
+  const tableKeep = { ...keep, vista: undefined }; // el periodo del gráfico no filtra nada
+  const hasFilter = Object.values(tableKeep).some(Boolean);
+  const dateFiltered = Boolean(keep.desde || keep.hasta);
+  const pg = (n: number) => (n > 1 ? String(n) : undefined);
+
+  // Gráfico: cabecera con el rango real (hasta hoy) y barras pulsables que filtran todo por ese día o mes.
+  const bars = sum.bars;
+  const sumBars = bars.reduce((a, x) => a + x.c, 0);
+  const peak = bars.reduce((m, x) => (x.c > m.c ? x : m), bars[0] ?? { c: 0, d: "" });
+  const firstD = bars[0]?.d;
+  const lastD = bars[bars.length - 1]?.d;
   const rango = !firstD ? "" : per.unit === "month"
     ? `${fmtD(firstD, { month: "short" })} – ${fmtD(lastD, { month: "short", year: "numeric" })}`
     : `${fmtD(firstD, { weekday: "short", day: "2-digit", month: "2-digit" })} – ${fmtD(lastD, { weekday: "short", day: "2-digit", month: "2-digit" })}`;
-  const pg = (n: number) => (n > 1 ? String(n) : undefined);
-  const tableKeep = { ...keep, vista: undefined }; // el periodo del gráfico no filtra la tabla
-  const hasFilter = Object.values(tableKeep).some(Boolean);
-  const kpi = (estado: string, label: string, n: unknown, amount: unknown, sub: string, cls: string) => (
+  const spanOf = (d: string): [string, string] => (per.unit === "month" ? [d, lastDayOfMonth(d)] : [d, d]);
+  const isSel = (d: string) => { const [a, b] = spanOf(d); return keep.desde === a && keep.hasta === b; };
+  const barHref = (d: string) => {
+    const [a, b] = spanOf(d);
+    const on = isSel(d);
+    return `/${qs({ ...keep, desde: on ? undefined : a, hasta: on ? undefined : b, p: undefined, id: undefined })}`;
+  };
+
+  // Resumen de los filtros activos (excepto el estado, que se ve en los chips).
+  const active: string[] = [];
+  if (keep.prov) active.push(`Proveedor: ${keep.prov}`);
+  if (keep.q) active.push(`Texto: “${keep.q}”`);
+  if (keep.ci) active.push(keep.ci === "logistico" ? "Circuito logístico" : "Circuito financiero");
+  if (keep.canal) active.push(keep.canal === "auto" ? "Canal auto" : "Canal manual");
+  if (dateFiltered) {
+    const a = keep.desde ? fmtD(keep.desde, { day: "2-digit", month: "2-digit", year: "numeric" }) : "…";
+    const b = keep.hasta ? fmtD(keep.hasta, { day: "2-digit", month: "2-digit", year: "numeric" }) : "…";
+    active.push(keep.desde && keep.desde === keep.hasta ? `Recibidas el ${a}` : `Recibidas ${a} – ${b}`);
+  }
+  if (keep.min || keep.max) active.push(`Importe ${keep.min ? `≥ ${keep.min} €` : ""}${keep.min && keep.max ? " y " : ""}${keep.max ? `≤ ${keep.max} €` : ""}`);
+
+  const kpi = (estado: string, label: string, n: number, amount: number, sub: string, cls: string) => (
     <Link className="panel kpi link" href={`/${qs({ ...keep, estado, p: undefined, id: undefined })}#facturas`}>
       <div className="k">{label}</div>
-      <div className={`kv ${cls}`}>{fmtInt(n)}<small> {(n as number) === 1 ? "factura" : "facturas"}</small></div>
+      <div className={`kv ${cls}`}>{fmtInt(n)}<small> {n === 1 ? "factura" : "facturas"}</small></div>
       <div className="ks c-mut">{eur(amount)}{sub}</div>
     </Link>
   );
@@ -96,48 +107,7 @@ export default async function Monitor({
 
   return (
     <>
-      <div className="row r4">
-        {kpi("pendiente", "Incidencias por revisar", k.inc_n, k.inc_amt, "", "c-amb")}
-        {kpi("pendiente_aprobacion", "Pendientes de aprobar", k.pend_n, k.pend_amt, "", "c-cy")}
-        {kpi(APROBADAS, "Aprobadas", k.apr_n, k.apr_amt, ` · ${fmtInt(k.por_contabilizar)} por contabilizar`, "c-grn")}
-        {kpi("contabilizada", "Contabilizadas en SAP", k.cont_n, k.cont_amt, "", "")}
-      </div>
-
-      <div className="row r2">
-        <div className="panel">
-          <div className="phead">
-            <h3>Facturas recibidas · {per.title}
-              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo{sumBars > 0 && peak ? `, pico de ${fmtInt(peak.c)}` : ""} · {fmtInt(k.n)} en total</small></h3>
-            <div className="seg">
-              {(Object.keys(VISTAS) as Vista[]).map((v) => (
-                <Link key={v} className={v === vista ? "on" : ""}
-                  href={`/${qs({ ...keep, vista: v === VISTA_DEFECTO ? undefined : v })}`}>{VISTAS[v].label}</Link>
-              ))}
-            </div>
-          </div>
-          <ReceivedChart bars={bars as Bar[]} unit={per.unit} />
-        </div>
-        <div className="panel">
-          <h3>Top proveedores · importe aprobado</h3>
-          {top.map((t) => (
-            <Link className="sup" key={t.s as string} href={`/${qs({ prov: t.s as string, estado: APROBADAS })}#facturas`}>
-              <span>{t.s}<small className="c-mut"> · {fmtInt(t.n)} {(t.n as number) === 1 ? "factura" : "facturas"}</small></span>
-              <b className="c-cy">{eur(t.t)}</b>
-            </Link>
-          ))}
-          {!top.length && <div className="c-mut">Todavía no hay facturas aprobadas.</div>}
-        </div>
-      </div>
-
-      <div className="panel" id="facturas">
-        <h3>Facturas · {fmtInt(totalRows)} {hasFilter ? "con este filtro" : "en total"}</h3>
-
-        <div className="chips">
-          {chip(undefined, "Todas", allRows)}
-          {ORDER.map((s) => chip(s, STATUS[s], cnt[s] ?? 0, COLOR[s]))}
-          {chip(APROBADAS, "Aprobado (total)", (cnt.aprobada ?? 0) + (cnt.contabilizada ?? 0))}
-        </div>
-
+      <div className="panel filterpanel">
         <FilterForm>
           {keep.estado && <input type="hidden" name="estado" value={keep.estado} />}
           {keep.vista && <input type="hidden" name="vista" value={keep.vista} />}
@@ -164,17 +134,62 @@ export default async function Monitor({
               <option value="manual">Manual (corregida)</option>
             </select>
           </label>
-          <label>Fecha factura desde<input type="date" name="desde" defaultValue={keep.desde ?? ""} /></label>
-          <label>Fecha factura hasta<input type="date" name="hasta" defaultValue={keep.hasta ?? ""} /></label>
+          <label>Recibidas desde<input type="date" name="desde" defaultValue={keep.desde ?? ""} /></label>
+          <label>Recibidas hasta<input type="date" name="hasta" defaultValue={keep.hasta ?? ""} /></label>
           <label>Importe mínimo (€)<input name="min" inputMode="decimal" defaultValue={keep.min ?? ""} placeholder="0" /></label>
           <label>Importe máximo (€)<input name="max" inputMode="decimal" defaultValue={keep.max ?? ""} placeholder="Sin límite" /></label>
           <div className="factions">
             <button className="btn pri">Filtrar</button>
-            {hasFilter && <Link className="btn" href={`/${qs({ vista: keep.vista })}#facturas`}>Limpiar</Link>}
-            <span style={{ flex: 1 }} />
-            <a className="btn out" href={`/api/export${qs(tableKeep)}`}>↓ Exportar CSV</a>
+            {hasFilter && <Link className="btn" href={`/${qs({ vista: keep.vista })}`}>Quitar filtros</Link>}
+            {hasFilter && <span className="scope">Todo lo de abajo (KPIs, gráfico, top y tabla) está filtrado: {active.join(" · ") || "estado"}</span>}
           </div>
         </FilterForm>
+      </div>
+
+      <div className="row r4">
+        {kpi("pendiente", "Incidencias por revisar", sum.inc.n, sum.inc.amt, "", "c-amb")}
+        {kpi("pendiente_aprobacion", "Pendientes de aprobar", sum.pend.n, sum.pend.amt, "", "c-cy")}
+        {kpi(APROBADAS, "Aprobadas", sum.apr.n, sum.apr.amt, ` · ${fmtInt(sum.porContabilizar)} por contabilizar`, "c-grn")}
+        {kpi("contabilizada", "Contabilizadas en SAP", sum.cont.n, sum.cont.amt, "", "")}
+      </div>
+
+      <div className="row r2">
+        <div className="panel">
+          <div className="phead">
+            <h3>Facturas recibidas · {per.title}
+              <small className="c-mut"> · {rango} · {fmtInt(sumBars)} en el periodo{sumBars > 0 ? `, pico de ${fmtInt(peak.c)}` : ""}</small></h3>
+            <div className="seg">
+              {(Object.keys(VISTAS) as Vista[]).map((v) => (
+                <Link key={v} className={v === vista ? "on" : ""}
+                  href={`/${qs({ ...keep, vista: v === VISTA_DEFECTO ? undefined : v })}`}>{VISTAS[v].label}</Link>
+              ))}
+            </div>
+          </div>
+          <ReceivedChart bars={bars} unit={per.unit} href={barHref} active={dateFiltered} selected={isSel} />
+        </div>
+        <div className="panel">
+          <h3>Top proveedores · importe aprobado</h3>
+          {sum.top.map((t) => (
+            <Link className="sup" key={t.s} href={`/${qs({ ...keep, prov: t.s, estado: APROBADAS })}#facturas`}>
+              <span>{t.s}<small className="c-mut"> · {fmtInt(t.n)} {t.n === 1 ? "factura" : "facturas"}</small></span>
+              <b className="c-cy">{eur(t.t)}</b>
+            </Link>
+          ))}
+          {!sum.top.length && <div className="c-mut">No hay facturas aprobadas con estos filtros.</div>}
+        </div>
+      </div>
+
+      <div className="panel" id="facturas">
+        <div className="phead">
+          <h3>Facturas · {fmtInt(totalRows)} {hasFilter || keep.estado ? "con este filtro" : "en total"}</h3>
+          <a className="btn out sm" href={`/api/export${qs(tableKeep)}`}>↓ Exportar CSV</a>
+        </div>
+
+        <div className="chips">
+          {chip(undefined, "Todas", sum.count)}
+          {ORDER.map((s) => chip(s, STATUS[s], cnt[s] ?? 0, COLOR[s]))}
+          {chip(APROBADAS, "Aprobadas (total)", (cnt.aprobada ?? 0) + (cnt.contabilizada ?? 0))}
+        </div>
 
         {bulkN > 0 && (
           <form id="bulk" className="bulk">
@@ -194,7 +209,7 @@ export default async function Monitor({
           <thead>
             <tr>
               <th className="chk">{bulkN > 0 && <SelectAll />}</th>
-              <th>Nº factura</th><th>Proveedor</th><th className="r">Importe</th><th>Circuito</th><th>Estado</th><th>Canal</th><th>Fecha factura</th>
+              <th>Nº factura</th><th>Proveedor</th><th className="r">Importe</th><th>Circuito</th><th>Estado</th><th>Canal</th><th>Recibida</th><th>Fecha factura</th>
             </tr>
           </thead>
           <tbody>
@@ -217,6 +232,7 @@ export default async function Monitor({
                     <td><span className="tag">{r.posting_type === "logistico" ? "Logístico" : "Financiero"}</span></td>
                     <td><Badge s={r.status as string} /></td>
                     <td className="c-mut">{r.manual ? "Manual" : "Auto"}</td>
+                    <td className="c-mut">{fmtDate(r.received_at)}</td>
                     <td className="c-mut">{r.invoice_date}</td>
                   </tr>
                   {open && (
