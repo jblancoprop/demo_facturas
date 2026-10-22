@@ -120,29 +120,7 @@ export default function Detail({
           )}
         </form>
 
-        <h4 className="sec">Circuito de aprobación{approvals.length ? ` · ${approvals.length} nivel${approvals.length > 1 ? "es" : ""} por importe` : ""}</h4>
-        {approvals.length === 0 && <div className="c-mut">Se asignarán aprobadores al validar la factura.</div>}
-        {approvals.map((a: any, k: number) => (
-          <div className="lv" key={a.id}>
-            <span className={`dot ${a.decision === "pending" && k === next ? "next" : a.decision}`} />
-            <span>Nivel {a.level} · {a.approver_name ?? a.approver_email}</span>
-            <span className="c-mut">— {a.decision === "approved" ? "aprobado" : a.decision === "rejected" ? "rechazado" : k === next ? "esperando decisión" : "pendiente"}{a.comment ? ` (${a.comment})` : ""}</span>
-          </div>
-        ))}
-
-        <h4 className="sec">Contabilización SAP · {log ? "circuito logístico" : "circuito financiero"}</h4>
-        <div className="sap">
-          {log ? (
-            <><b>MIRO</b> · Factura contra pedido <b>{inv.po_number || "—"}</b> · {lines.length} posiciones a casar con pedido y entrada de mercancía</>
-          ) : (
-            <><b>FB60</b> · Factura sin pedido · imputación a cuenta de gasto y centro de coste</>
-          )}
-          <div style={{ marginTop: 6 }} className={inv.sap_doc ? "" : "c-mut"}>
-            {inv.sap_doc ? <>Documento SAP: <b>{inv.sap_doc}</b></> : "Se lanzará al aprobar el último nivel (simulado en la demo)."}
-          </div>
-        </div>
-
-        <div className="act">
+        <div className="act decide">
           {(inv.status === "pendiente" || inv.status === "pendiente_aprobacion") && (
             <form action={rejectInvoice} className="inline">
               <input type="hidden" name="id" value={inv.id} />
@@ -169,6 +147,28 @@ export default function Detail({
               <button className="btn">Volver a revisión</button>
             </form>
           )}
+        </div>
+
+        <h4 className="sec">Circuito de aprobación{approvals.length ? ` · ${approvals.length} nivel${approvals.length > 1 ? "es" : ""} por importe` : ""}</h4>
+        {approvals.length === 0 && <div className="c-mut">Se asignarán aprobadores al validar la factura.</div>}
+        {approvals.map((a: any, k: number) => (
+          <div className="lv" key={a.id}>
+            <span className={`dot ${a.decision === "pending" && k === next ? "next" : a.decision}`} />
+            <span>Nivel {a.level} · {a.approver_name ?? a.approver_email}</span>
+            <span className="c-mut">— {a.decision === "approved" ? "aprobado" : a.decision === "rejected" ? "rechazado" : k === next ? "esperando decisión" : "pendiente"}{a.comment ? ` (${a.comment})` : ""}</span>
+          </div>
+        ))}
+
+        <h4 className="sec">Contabilización SAP · {log ? "circuito logístico" : "circuito financiero"}</h4>
+        <div className="sap">
+          {log ? (
+            <><b>MIRO</b> · Factura contra pedido <b>{inv.po_number || "—"}</b> · {lines.length} posiciones a casar con pedido y entrada de mercancía</>
+          ) : (
+            <><b>FB60</b> · Factura sin pedido · imputación a cuenta de gasto y centro de coste</>
+          )}
+          <div style={{ marginTop: 6 }} className={inv.sap_doc ? "" : "c-mut"}>
+            {inv.sap_doc ? <>Documento SAP: <b>{inv.sap_doc}</b></> : "Se lanzará al aprobar el último nivel (simulado en la demo)."}
+          </div>
         </div>
 
         <h4 className="sec">Histórico de intervenciones</h4>

@@ -140,14 +140,30 @@ export async function approveInvoice(fd: FormData) {
   await finish(id);
 }
 
-export async function rejectInvoice(fd: FormData) {
-  const id = txt(fd.get("id"));
-  const reason = txt(fd.get("reason")) || "Sin motivo indicado";
+// Rechaza una factura que todavía está en revisión o en aprobación. Devuelve false si ya no lo estaba.
+async function rejectOne(id: string, reason: string): Promise<boolean> {
+  const done = await sql`update invoices set status = 'rechazada', rejection_reason = ${reason}, updated_at = now()
+            where id = ${id} and status in ('pendiente', 'pendiente_aprobacion') returning id`;
+  if (!done.length) return false;
   await sql`update approvals set decision = 'rejected', comment = ${reason}, decided_at = now()
             where id = (select id from approvals where invoice_id = ${id} and decision = 'pending' order by level limit 1)`;
-  await sql`update invoices set status = 'rechazada', rejection_reason = ${reason}, updated_at = now() where id = ${id}`;
   await log(id, "rechazada", reason);
+  return true;
+}
+
+export async function rejectInvoice(fd: FormData) {
+  const id = txt(fd.get("id"));
+  await rejectOne(id, txt(fd.get("reason")) || "Sin motivo indicado");
   await finish(id);
+}
+
+// Rechaza las facturas marcadas en la tabla con el mismo motivo (solo las que siguen en revisión o aprobación).
+export async function rejectSelected(fd: FormData) {
+  const reason = txt(fd.get("reason")) || "Sin motivo indicado";
+  const done: string[] = [];
+  for (const id of fd.getAll("sel").map(String)) if (await rejectOne(id, reason)) done.push(id);
+  revalidatePath("/", "layout");
+  await Promise.all(done.map(syncOne));
 }
 
 export async function reopenInvoice(fd: FormData) {
