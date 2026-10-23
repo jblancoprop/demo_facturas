@@ -29,13 +29,15 @@ async function finish(id: string) {
 async function syncOne(id: string) {
   const [r] = await sql`select i.*,
     (select count(*)::int from approvals a where a.invoice_id = i.id) as lv,
-    (select count(*)::int from approvals a where a.invoice_id = i.id and a.decision = 'approved') as ok
+    (select count(*)::int from approvals a where a.invoice_id = i.id and a.decision = 'approved') as ok,
+    (select a.comment from approvals a where a.invoice_id = i.id and a.comment is not null and a.comment <> ''
+       order by a.decided_at desc nulls last limit 1) as last_comment
     from invoices i where i.id = ${id}`;
   if (!r) return;
   await syncExcel({
     id: r.id,
     estado: EXCEL_ESTADO[r.status as string] ?? r.status,
-    motivo: r.rejection_reason ?? r.issues ?? "",
+    motivo: r.rejection_reason || r.last_comment || r.issues || "", // motivo de rechazo, si no el último comentario de aprobación, si no las incidencias
     nivel_aprobado: `${r.ok}/${r.lv}`,
     sap_doc: r.sap_doc ?? "",
     proveedor: r.supplier_name,
