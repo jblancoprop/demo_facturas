@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import Link from "next/link";
-import { sql, STATUS, ORDER, COLOR, eur, qs } from "@/lib/db";
+import { STATUS, ORDER, COLOR, eur, qs } from "@/lib/db";
+import { allInvoices } from "@/lib/store";
 import { fmtInt } from "@/lib/num";
 import { getDetail } from "@/lib/queries";
 import { APROBADAS, baseRows, keepParams, listInvoices, parseFilters, type RawFilters } from "@/lib/filters";
@@ -10,7 +11,7 @@ import { ConfirmButton, RejectButton, SelectAll } from "@/components/BulkControl
 import Detail, { Badge } from "@/components/Detail";
 import FilterForm from "@/components/FilterForm";
 import ReceivedChart from "@/components/ReceivedChart";
-import { VISTAS, VISTA_DEFECTO, parseVista, type Vista } from "@/lib/periods";
+import { VISTAS, VISTA_DEFECTO, buildBuckets, parseVista, type Vista } from "@/lib/periods";
 import { missingFields } from "@/lib/required";
 
 export const dynamic = "force-dynamic";
@@ -35,16 +36,8 @@ export default async function Monitor({
   const per = VISTAS[vista];
 
   // Ejes del gráfico del periodo elegido (días o meses) y lista de proveedores para el desplegable.
-  const buckets = (await sql`with p as (
-      select date_trunc(${per.trunc}::text, now() at time zone 'Europe/Madrid') + ${per.shift}::interval as ini)
-    select to_char(g, 'YYYY-MM-DD') as d, g > now() at time zone 'Europe/Madrid' as fut
-    from p, generate_series(
-      p.ini,
-      case when ${per.span}::text is null then date_trunc('month', now() at time zone 'Europe/Madrid')
-           else p.ini + ${per.span}::interval end,
-      ${per.step}::interval) g
-    order by g`) as Bucket[];
-  const provs = await sql`select distinct supplier_name as s from invoices where coalesce(supplier_name, '') <> '' order by 1 limit 500`;
+  const buckets: Bucket[] = buildBuckets(vista);
+  const provs = [...new Set((await allInvoices()).map((r) => r.supplier_name as string).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")).slice(0, 500).map((s) => ({ s }));
 
   // KPIs, chips, gráfico y top salen de las mismas filas filtradas; la tabla aplica además el estado y se pagina.
   const sum = summarize(await baseRows(f), f, buckets, per.unit);

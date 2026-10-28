@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Exo_2, IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import Tabs from "@/components/Tabs";
-import { sql } from "@/lib/db";
+import { allInvoices } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -14,9 +14,8 @@ const exo = Exo_2({ subsets: ["latin"], weight: ["400", "600", "700"], variable:
 const plex = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-plex" });
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const c = await sql`select
-    count(*) filter (where status = 'pendiente')::int as inc,
-    count(*) filter (where status = 'pendiente_aprobacion')::int as apr from invoices`;
+  const all = await allInvoices();
+  const c = [{ inc: all.filter((r) => r.status === "pendiente").length, apr: all.filter((r) => r.status === "pendiente_aprobacion").length }];
   return (
     <html lang="es" className={`${exo.variable} ${plex.variable}`}>
       <body>
