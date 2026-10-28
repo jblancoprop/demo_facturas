@@ -1,10 +1,11 @@
-import { sql } from "@/lib/db";
+import { findInvoice } from "@/lib/store";
 
+// El PDF vive en un campo adjunto de Airtable; su URL caduca, así que se lee en cada petición y se sirve desde aquí.
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const r = await sql`select pdf_b64 from invoices where id = ${id}`;
-  if (!r[0]?.pdf_b64) return new Response("not found", { status: 404 });
-  return new Response(new Uint8Array(Buffer.from(r[0].pdf_b64 as string, "base64")), {
-    headers: { "content-type": "application/pdf", "content-disposition": "inline" },
-  });
+  const inv = await findInvoice(id, true);
+  if (!inv?.pdf_url) return new Response("not found", { status: 404 });
+  const r = await fetch(inv.pdf_url as string);
+  if (!r.ok) return new Response("not found", { status: 404 });
+  return new Response(await r.arrayBuffer(), { headers: { "content-type": "application/pdf", "content-disposition": "inline" } });
 }

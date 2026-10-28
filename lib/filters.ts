@@ -1,4 +1,6 @@
-import { sql, STATUS } from "./db";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { STATUS } from "./db";
+import { allInvoices } from "./store";
 import { VISTA_DEFECTO, parseVista } from "./periods";
 
 // Filtros de la pantalla. Los usan el Monitor entero (KPIs, gráfico, top de proveedores, chips y tabla),
@@ -41,7 +43,7 @@ export function parseFilters(raw: RawFilters): Filters {
     ci: raw.ci === "logistico" || raw.ci === "financiero" ? raw.ci : null,
     canal: raw.canal === "auto" || raw.canal === "manual" ? raw.canal : null,
     prov: raw.prov?.trim() || null,
-    term: raw.q?.trim() ? `%${raw.q.trim()}%` : null,
+    term: raw.q?.trim().toLowerCase() || null,
     desde: isoKey(raw.desde),
     hasta: isoKey(raw.hasta),
     min: amount(raw.min),
@@ -66,22 +68,32 @@ export function keepParams(raw: RawFilters): Record<string, string | undefined> 
   };
 }
 
+// Día de recepción (AAAAMMDD) en zona Europe/Madrid.
+const madridDay = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid" });
+const dayOf = (iso: unknown) => (iso ? madridDay.format(new Date(iso as string)) : "");
+
+// Filtros que no dependen del estado ni de las fechas (los comparten tabla, KPIs, gráfico y top).
+const matchBase = (f: Filters) => (r: Record<string, any>) =>
+  (!f.ci || r.posting_type === f.ci) &&
+  (!f.canal || r.manual === (f.canal === "manual")) &&
+  (!f.prov || r.supplier_name === f.prov) &&
+  (!f.term || String(r.supplier_name ?? "").toLowerCase().includes(f.term) || String(r.invoice_number ?? "").toLowerCase().includes(f.term)) &&
+  (f.min === null || r.total >= f.min) &&
+  (f.max === null || r.total <= f.max);
+
 // Tabla: aplica todos los filtros y pagina.
 export async function listInvoices(f: Filters, opts: { limit?: number; offset?: number } = {}) {
-  return sql`select id, supplier_name, supplier_nif, invoice_number, invoice_date, base, vat, total,
-      posting_type, status, po_number, sap_doc, rejection_reason, manual, received_at
-    from invoices
-    where (${f.statuses}::text is null or status = any(string_to_array(${f.statuses}::text, ',')))
-      and (${f.ci}::text is null or posting_type = ${f.ci})
-      and (${f.canal}::text is null or manual = (${f.canal}::text = 'manual'))
-      and (${f.prov}::text is null or supplier_name = ${f.prov})
-      and (${f.term}::text is null or supplier_name ilike ${f.term} or invoice_number ilike ${f.term})
-      and (${f.min}::numeric is null or total >= ${f.min})
-      and (${f.max}::numeric is null or total <= ${f.max})
-      and (${f.desde}::text is null or to_char(received_at at time zone 'Europe/Madrid', 'YYYYMMDD') >= ${f.desde})
-      and (${f.hasta}::text is null or to_char(received_at at time zone 'Europe/Madrid', 'YYYYMMDD') <= ${f.hasta})
-    order by received_at desc
-    limit ${opts.limit ?? null} offset ${opts.offset ?? 0}`;
+  const st = f.statuses ? f.statuses.split(",") : null;
+  const base = matchBase(f);
+  const rows = (await allInvoices())
+    .filter((r) => base(r) && (!st || st.includes(r.status)))
+    .filter((r) => {
+      const d = dayOf(r.received_at).replace(/-/g, "");
+      return (!f.desde || d >= f.desde) && (!f.hasta || d <= f.hasta);
+    })
+    .sort((a, b) => String(b.received_at ?? "").localeCompare(String(a.received_at ?? "")));
+  const o = opts.offset ?? 0;
+  return opts.limit ? rows.slice(o, o + opts.limit) : rows.slice(o);
 }
 
 export type BaseRow = { status: string; total: number | string; supplier_name: string | null; d: string };
@@ -90,13 +102,6 @@ export type BaseRow = { status: string; total: number | string; supplier_name: s
 // EXCEPTO el estado y las fechas (cada uno de esos elementos aplica el suyo: el gráfico agrupa por fecha y
 // los KPIs por estado). Se resumen en memoria, así un filtro afecta siempre a todo por igual.
 export async function baseRows(f: Filters): Promise<BaseRow[]> {
-  return (await sql`select status, total, supplier_name,
-      to_char(received_at at time zone 'Europe/Madrid', 'YYYY-MM-DD') as d
-    from invoices
-    where (${f.ci}::text is null or posting_type = ${f.ci})
-      and (${f.canal}::text is null or manual = (${f.canal}::text = 'manual'))
-      and (${f.prov}::text is null or supplier_name = ${f.prov})
-      and (${f.term}::text is null or supplier_name ilike ${f.term} or invoice_number ilike ${f.term})
-      and (${f.min}::numeric is null or total >= ${f.min})
-      and (${f.max}::numeric is null or total <= ${f.max})`) as BaseRow[];
+  const base = matchBase(f);
+  return (await allInvoices()).filter(base).map((r) => ({ status: r.status, total: r.total, supplier_name: r.supplier_name, d: dayOf(r.received_at) }));
 }

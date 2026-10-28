@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Link from "next/link";
-import { sql } from "@/lib/db";
+import { allInvoices } from "@/lib/store";
 import { getDetail } from "@/lib/queries";
 import Detail from "./Detail";
 
@@ -8,7 +8,7 @@ import Detail from "./Detail";
 export default async function Queue({
   status, base, id, title, empty,
 }: { status: string; base: string; id?: string; title: string; empty: string }) {
-  const list = await sql`select id from invoices where status = ${status} order by received_at`;
+  const list = (await allInvoices()).filter((r) => r.status === status).sort((a, b) => String(a.received_at ?? "").localeCompare(String(b.received_at ?? "")));
   if (!list.length) return <div className="panel empty">{empty}</div>;
   let idx = list.findIndex((r) => r.id === id);
   if (idx < 0) idx = 0;
